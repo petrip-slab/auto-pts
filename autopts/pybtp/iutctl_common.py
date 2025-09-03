@@ -13,23 +13,22 @@
 # more details.
 #
 
+import binascii
 import logging
 import os
 import queue
+import re
 import socket
 import sys
 import threading
-import binascii
-import re
-
-
 from abc import abstractmethod
+from datetime import datetime
+
+import serial
 
 from autopts.pybtp import defs
-from autopts.pybtp.defs import *
-from datetime import datetime
+from autopts.pybtp.parser import HDR_LEN, dec_data, dec_hdr, enc_frame, repr_hdr
 from autopts.pybtp.types import BTPError
-from autopts.pybtp.parser import enc_frame, dec_hdr, repr_hdr, dec_data, HDR_LEN
 from autopts.utils import get_global_end, raise_on_global_end
 
 log = logging.debug
@@ -82,14 +81,16 @@ class BTPSocket:
         f = self.log_file
         indent = ' ' * 18
 
+        hex_data = hex_data[:14] + "|" + hex_data[14 + 1:]
+
         if len(hex_data) > 47:
             # This ensures clean text indentation for longer raw data, with 16 bytes per line
             hex_data = '\n' + indent + re.sub(r'(.{48})', r'\1\n' + indent, hex_data)
 
         if req:
-            f.write(f'{current_time[:-3]}\t> {self.parse_data(data)} {hex_data}\n')
+            f.write(f'{current_time[:-3]}    > {self.parse_data(data)} {hex_data}\n')
         else:
-            f.write(f'{current_time[:-3]}\t< {self.parse_data(data)} {hex_data}\n')
+            f.write(f'{current_time[:-3]}    < {self.parse_data(data)} {hex_data}\n')
 
     def write_err_status(self, data, hex_data, status):
         """Log command status value for error response"""
@@ -102,7 +103,7 @@ class BTPSocket:
             4: 'Invalid Index'
         }
         err_status = status_values[int(status)]
-        f.write(f'{current_time[:-3]}\t<- Response:  {self.parse_data(data)} {hex_data} {err_status}\n')
+        f.write(f'{current_time[:-3]}    < {self.parse_data(data, err_status)} {hex_data}\n')
 
     def read(self, timeout=20.0):
         """Read BTP data from socket
@@ -118,12 +119,12 @@ class BTPSocket:
             nbytes = self.conn.recv_into(hdr_memview, toread_hdr_len)
             if nbytes == 0 and toread_hdr_len != 0:
                 # The connection is closed and the BTPSocket should be reinited
-                raise socket.error
+                raise OSError
             logging.debug("Read %d bytes", nbytes)
             hdr_memview = hdr_memview[nbytes:]
             toread_hdr_len -= nbytes
 
-        hex_hdr = ' '.join(hdr.hex()[i:i+2] for i in range(0, len(hdr.hex()), 2))
+        hex_hdr = ' '.join(hdr.hex()[i:i + 2] for i in range(0, len(hdr.hex()), 2))
         tuple_hdr = dec_hdr(hdr)
         toread_data_len = tuple_hdr.data_len
 
@@ -137,12 +138,12 @@ class BTPSocket:
             nbytes = self.conn.recv_into(data_memview, toread_data_len)
             logging.debug("Read %d bytes data", nbytes)
             if nbytes == 0 and toread_data_len != 0:
-                raise socket.error
+                raise OSError
             data_memview = data_memview[nbytes:]
             toread_data_len -= nbytes
 
         data_string = binascii.hexlify(data).decode('utf-8')
-        data_string = ' '.join(f'{data_string[i:i+2]}' for i in range(0, len(data_string), 2))
+        data_string = ' '.join(f'{data_string[i:i + 2]}' for i in range(0, len(data_string), 2))
         raw_data = hex_hdr if data_string == '' else hex_hdr + ' ' + data_string
 
         if tuple_hdr.op == 0:
@@ -164,13 +165,13 @@ class BTPSocket:
 
         logging.debug("sending frame %r", frame.hex())
 
-        hex_data = ' '.join(frame.hex()[i:i+2] for i in range(0, len(frame.hex()), 2))
-        tuple_data = (svc_id, op, ctrl_index, len(data) if isinstance(data, (str,  bytearray)) else data)
+        hex_data = ' '.join(frame.hex()[i:i + 2] for i in range(0, len(frame.hex()), 2))
+        tuple_data = (svc_id, op, ctrl_index, len(data) if isinstance(data, (str, bytearray)) else data)
         # 0 for logging response, 1 for command
         self.write_to_log(1, tuple_data, hex_data)
         self.conn.send(frame)
 
-    def parse_data(self, data):
+    def parse_data(self, data, extra=None):
         def get_btp_cmd_name(prefix, op_code):
             """Looks for BTP Command variables from the defs.py"""
             if op_code in ('0x0', '0x00'):
@@ -195,10 +196,14 @@ class BTPSocket:
                 break
 
         indent = "\n" + (" " * 17)
-        to_hex = lambda x: "0x{:02x}".format(int(x))
+
+        def to_hex(x):
+            return f"0x{int(x):02x}"
         btp_command = get_btp_cmd_name(svc_name, to_hex(opc))
-        parsed_data += f'{btp_command} ({to_hex(svc_id)}|{to_hex(opc)}|{to_hex(ctrl_idx)}){indent} ' \
-                       f'raw data ({data_len}):'
+        parsed_data += f'{btp_command} ({to_hex(svc_id)}|{to_hex(opc)}|{to_hex(ctrl_idx)})'
+        if extra:
+            parsed_data += f' {extra}'
+        parsed_data += f'{indent} raw data ({data_len}):'
 
         return parsed_data
 
@@ -307,7 +312,7 @@ class BTPWorker:
             except socket.timeout:
                 # this one is expected so ignore
                 pass
-            except socket.error:
+            except OSError:
                 if socket_ok:
                     socket_ok = False
                     log('socket.error: BTPSocket is closed')
@@ -359,16 +364,16 @@ class BTPWorker:
 
             if tuple_hdr.svc_id != svc_id:
                 raise BTPError(
-                    "Incorrect service ID %s in the response, expected %s!" %
-                    (tuple_hdr.svc_id, svc_id))
+                    f"Incorrect service ID {tuple_hdr.svc_id} in the response, expected {svc_id}!"
+                )
 
             if tuple_hdr.op == defs.BTP_STATUS:
                 raise BTPError("Error opcode in response!")
 
             if op != tuple_hdr.op:
                 raise BTPError(
-                    "Invalid opcode 0x%.2x in the response, expected 0x%.2x!" %
-                    (tuple_hdr.op, op))
+                    f"Invalid opcode 0x{tuple_hdr.op:02x} in the response, expected 0x{op:02x}!"
+                )
 
             return tuple_data
         finally:
@@ -407,3 +412,45 @@ class BTPWorker:
 
     def register_event_handler(self, event_handler):
         self.event_handler_cb = event_handler
+
+
+class LoggerWorker:
+
+    def __init__(self, com, baud, log_dir):
+        self._running = threading.Event()
+        self._rx_worker = threading.Thread(target=self._rx_task)
+        self._rx_worker.name = f'LoggerWorker{self._rx_worker.name}'
+        self._log_file = open(os.path.join(log_dir, "autopts-iutctl_net.log"), "a")
+        self._ser = serial.Serial(port=com, baudrate=baud, timeout=1)
+
+    def _rx_task(self):
+        log(f'{threading.current_thread().name} started')
+        while self._running.is_set() and not get_global_end():
+            try:
+                data = self._ser.read(99999)
+            except serial.SerialException:
+                continue
+            text = data.decode('utf-8', errors='replace')
+            self._log_file.write(text)
+
+        log(f'{threading.current_thread().name} finishing...')
+
+    def start(self):
+        self._running.set()
+        self._rx_worker.start()
+
+    def close(self):
+        if self._running.is_set():
+            self._running.clear()
+
+            # is_alive returns True if a thread has not been started
+            # and may result in deadlock here.
+            while self._rx_worker.is_alive() and not get_global_end():
+                log('Waiting for _rx_worker to finish ...')
+                self._rx_worker.join(timeout=1)
+
+        if self._ser:
+            self._ser.close()
+
+        if self._log_file:
+            self._log_file.close()

@@ -14,7 +14,6 @@
 # more details.
 #
 import importlib
-import logging
 import os
 import subprocess
 import sys
@@ -25,10 +24,8 @@ from pathlib import Path
 from autopts import bot
 from autopts.bot.common import BuildAndFlashException
 from autopts.client import Client
-from autopts.ptsprojects.boards import get_build_and_flash, get_board_type
+from autopts.ptsprojects.boards import get_board_type, get_build_and_flash
 from autopts.ptsprojects.mynewt.iutctl import get_iut, log
-from autopts.bot.common_features import report
-
 
 PROJECT_NAME = Path(__file__).stem
 
@@ -121,7 +118,7 @@ class MynewtBotClient(bot.common.BotClient):
             overlay['BTTESTER_BTP_LOG'] = '1'
             overlay['CONSOLE_UART_FLOW_CONTROL'] = 'UART_FLOW_CTL_RTS_CTS'
 
-        log("TTY path: %s" % args.tty_file)
+        log(f"TTY path: {args.tty_file}")
 
         if not args.no_build:
             build_and_flash = get_build_and_flash(args.board_name)
@@ -131,8 +128,8 @@ class MynewtBotClient(bot.common.BotClient):
                 build_and_flash(args.project_path, board_type, overlay, args.debugger_snr)
             except BaseException as e:
                 traceback.print_exception(e)
-                report.make_error_txt('Build and flash step failed', self.file_paths['ERROR_TXT_FILE'])
-                raise BuildAndFlashException
+                self.error_txt_content += "Build and flash step failed\n"
+                raise BuildAndFlashException from e
 
             time.sleep(10)
 

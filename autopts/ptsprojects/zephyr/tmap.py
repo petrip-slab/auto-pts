@@ -13,15 +13,13 @@
 # more details.
 #
 
-from enum import IntEnum
-import struct
 
-from autopts.ptsprojects.stack import get_stack
 from autopts.client import get_unique_name
+from autopts.ptsprojects.stack import get_stack
 from autopts.ptsprojects.testcase import TestFunc
+from autopts.ptsprojects.zephyr.tmap_wid import tmap_wid_hdl
 from autopts.ptsprojects.zephyr.ztestcase import ZTestCase
 from autopts.pybtp import btp
-from autopts.ptsprojects.zephyr.tmap_wid import tmap_wid_hdl
 from autopts.pybtp.types import Addr
 
 
@@ -49,7 +47,7 @@ def set_pixits(ptses):
     pts.set_pixit("TMAP", "TSPX_Extended_Adv_Interval_max", "1200")
     pts.set_pixit("TMAP", "TSPX_Periodic_Adv_Interval_min", "600")
     pts.set_pixit("TMAP", "TSPX_Periodic_Adv_Interval_max", "600")
-    pts.set_pixit("TMAP", "TSPX_TARGET_LATENCY", "TARGET_LOWER_LATENCY")
+    pts.set_pixit("TMAP", "TSPX_TARGET_LATENCY", "TARGET_BALANCED_LATENCY_RELIABILITY")
     pts.set_pixit("TMAP", "TSPX_TARGET_PHY", "LE_2M_PHY")
 
 

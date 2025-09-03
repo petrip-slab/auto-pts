@@ -17,15 +17,15 @@ import logging
 import re
 import struct
 
-from autopts.pybtp import btp, defs
 from autopts.ptsprojects.stack import get_stack
+from autopts.pybtp import btp, defs
 from autopts.pybtp.types import AdType, OwnAddrType, WIDParams, gap_settings_btp2txt
-from autopts.wid import generic_wid_hdl
 
 log = logging.debug
 
 
 def csip_wid_hdl(wid, description, test_case_name):
+    from autopts.wid import generic_wid_hdl
     log(f'{csip_wid_hdl.__name__}, {wid}, {description}, {test_case_name}')
     return generic_wid_hdl(wid, description, test_case_name, [__name__])
 
@@ -184,7 +184,7 @@ def hdl_wid_20100(params: WIDParams):
         btp.gap_pair(addr, addr_type)
         stack.gap.gap_wait_for_sec_lvl_change(level=2, timeout=30, addr=addr)
 
-    #CSIP/CL/SP/BV-07-C will receive the WID 20101. Hence, no need to perform discovery here.
+    # CSIP/CL/SP/BV-07-C will receive the WID 20101. Hence, no need to perform discovery here.
 
     if 'CSIP/CL/SP/BV-03-C' in params.test_case_name or\
             'CSIP/CL/SP/BV-04-C' in params.test_case_name or\
@@ -402,6 +402,19 @@ def hdl_wid_20206(params: WIDParams):
     handle/UUID pair(s) is returned to the upper tester.
     """
     stack = get_stack()
+
+    # Fix: Check if the event queue is empty
+    # Workaround for PTS Request ID 173881
+    discovered_events = stack.csip.event_queues[defs.BTP_CSIP_EV_DISCOVERED]
+    if not discovered_events:
+        addr_type = btp.pts_addr_type_get()
+        addr = btp.pts_addr_get()
+
+        btp.csip_discover(addr_type, addr)
+        ev = stack.csip.wait_discovery_completed_ev(addr_type, addr, 30, False)
+        if ev is None:
+            logging.error("No CSIP discovery events received")
+            return False
 
     chars = stack.csip.event_queues[defs.BTP_CSIP_EV_DISCOVERED][0][3:]
     chrc_list = [f'{chrc:04X}' for chrc in chars]

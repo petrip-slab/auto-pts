@@ -15,19 +15,32 @@
 #
 
 """Utilities"""
+import csv
 import ctypes
 import logging
 import os
+import re
 import sys
 import threading
 import traceback
 import xmlrpc.client
-import hid
-import psutil
+from collections import defaultdict
+from pathlib import Path
 from time import sleep
 
+import hid
+import psutil
 
 PTS_WORKSPACE_FILE_EXT = ".pqw6"
+
+# Global paths for wid report
+BASE_DIR = Path(__file__).parent.parent.resolve()
+LOG_DIR = BASE_DIR / "logs"
+OUTPUT_CSV_PATH = BASE_DIR / "wid_usage_report.csv"
+
+# Regex patterns for log field parsing in wid report
+WID_REGEX = re.compile(r"^wid:\s*(\S+)")
+TC_NAME_REGEX = re.compile(r"^test_case_name:\s*(.+)")
 
 # A mechanism for safely terminating threads
 # after interrupt triggered with Ctrl+C
@@ -102,9 +115,13 @@ class ResultWithFlag:
 
         If timeout, will throw an exception: TimeoutError
         """
+
+        def _default_predicate():
+            return True
+
         # Ctrl+C friendly under Windows
         if predicate is None:
-            predicate = lambda: True
+            predicate = _default_predicate
 
         raise_timeout = False
 
@@ -206,7 +223,7 @@ pykush_installed = False
 try:
     import pykush.pykush as pykush
     pykush_installed = True
-except:
+except ImportError:
     pass
 
 
@@ -234,7 +251,7 @@ def get_own_workspaces():
     script_path = os.path.split(os.path.abspath(__file__))[0]
     workspaces = {}
 
-    for root, dirs, files in os.walk(os.path.join(script_path, "workspaces")):
+    for root, _dirs, files in os.walk(os.path.join(script_path, "workspaces")):
         for file in files:
             if file.endswith(PTS_WORKSPACE_FILE_EXT):
                 name = os.path.splitext(file)[0]
@@ -301,13 +318,13 @@ if sys.platform == 'win32':
 
         return False
 
-
     def have_admin_rights():
         """"Check if the process has Administrator rights"""
         try:
             return ctypes.windll.shell32.IsUserAnAdmin() == 1
-        except AttributeError:
-            raise AdminStateUnknownError
+        except AttributeError as e:
+            raise AdminStateUnknownError from e
+
 
 else:
     _pyudev = False
@@ -321,21 +338,25 @@ else:
         if os.path.islink(serial_address):
             serial_address = os.path.realpath(serial_address)
 
+        def _device_has_serial(device, serial_address):
+            try:
+                return serial_address in device.get('DEVNAME')
+            except BaseException:
+                return False
+
         context = _pyudev.Context()
         for device in context.list_devices(subsystem=subsystem):
-            try:
-                if serial_address in device.get('DEVNAME'):
-                    return True
-            except BaseException as e:
-                pass
+            if _device_has_serial(device, serial_address):
+                return True
+
         return False
 
     def have_admin_rights():
         """"Check if the process has Administrator rights"""
         try:
             return os.getuid() == 0
-        except AttributeError:
-            raise AdminStateUnknownError
+        except AttributeError as e:
+            raise AdminStateUnknownError from e
 
 
 def ykush_replug_usb(ykush_config, device_id=None, delay=0, end_flag=None):
@@ -400,7 +421,7 @@ def hid_gpio_hub_set_usb_power(vid, pid, port, on):
 
     if 1 <= index <= len(cmd) - 1:
         cmd_list = list(cmd)
-        cmd_list[index] = ord('0' if on else '1')
+        cmd_list[index] = ord('1' if on else '0')
         cmd = bytes(cmd_list)
 
     for device in hid.enumerate(vid, pid):
@@ -420,35 +441,54 @@ def hid_gpio_hub_set_usb_power(vid, pid, port, on):
 
 
 def active_hub_server_replug_usb(config):
+    if isinstance(config["usb_port"], list):
+        ports = config["usb_port"]
+    else:
+        ports = [config["usb_port"]]
+
     with xmlrpc.client.ServerProxy(uri=f"http://{config['ip']}:{config['tcp_port']}/",
                                    allow_none=True, transport=None,
                                    encoding=None, verbose=False,
                                    use_datetime=False, use_builtin_types=False,
                                    headers=(), context=None) as proxy:
-        logging.debug(f'Power down USB port: {config["usb_port"]}')
-        proxy.set_usb_power(config['usb_port'], False)
+        for port in ports:
+            logging.debug(f'Power down USB port: {port}')
+            proxy.set_usb_power(port, False)
+
         sleep(config['replug_delay'])
-        logging.debug(f'Power up USB port: {config["usb_port"]}')
-        proxy.set_usb_power(config['usb_port'], True)
+
+        for port in ports:
+            logging.debug(f'Power up USB port: {port}')
+            proxy.set_usb_power(port, True)
 
 
 def active_hub_server_set_usb_power(config, on):
+    if isinstance(config["usb_port"], list):
+        ports = config["usb_port"]
+    else:
+        ports = [config["usb_port"]]
+
     with xmlrpc.client.ServerProxy(uri=f"http://{config['ip']}:{config['tcp_port']}/",
                                    allow_none=True, transport=None,
                                    encoding=None, verbose=False,
                                    use_datetime=False, use_builtin_types=False,
                                    headers=(), context=None) as proxy:
 
-        proxy.set_usb_power(config['usb_port'], on)
+        for port in ports:
+            proxy.set_usb_power(port, on)
 
 
 def print_thread_stack_trace():
-    logging.debug("Printing stack trace for each thread:")
-    for thread_id, thread_obj in threading._active.items():
-        stack = sys._current_frames().get(thread_id)
-        if stack is not None:
-            logging.debug(f"Thread ID: {thread_id}, Thread Name: {thread_obj.name}")
-            logging.debug(traceback.extract_stack(stack))
+    try:
+        logging.debug("Printing stack trace for each thread:")
+        for thread_id, thread_obj in threading._active.items():
+            stack = sys._current_frames().get(thread_id)
+            if stack is not None:
+                logging.debug(f"Thread ID: {thread_id}, Thread Name: {thread_obj.name}")
+                logging.debug(traceback.extract_stack(stack))
+    except RuntimeError as e:
+        # threading._active dictionary can change size during iteration
+        logging.debug(e)
 
 
 def exit_if_admin():
@@ -463,6 +503,81 @@ def log_memory_usage():
 
     mem_usage = mem_info.rss / (1024 ** 2)
     logging.debug(f"Memory usage: {mem_usage:.2f} MB")
+
+
+def extract_wid_testcases_to_csv():
+
+    # Example log block format:
+    # BEGIN OnImplicitSend:
+    # wid: 35
+    # test_case_name: GAP/ADV/BV-01-C
+    # ...
+    # END OnImplicitSend
+
+    profile_wid_map = defaultdict(lambda: defaultdict(set))
+
+    for log_file in LOG_DIR.rglob("*.log"):
+        logging.debug(f"Processing log file: {log_file}")
+        try:
+            with log_file.open(encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+        except Exception as e:
+            logging.warning(f"Failed to read {log_file}: {e}")
+            continue
+
+        # Track wheter inside an OnImplicitSend block
+        in_implicit_send_block = False
+        wid = None
+        test_case_name = None
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Detect start of a new block
+            if not in_implicit_send_block and stripped.startswith("BEGIN OnImplicitSend:"):
+                in_implicit_send_block = True
+                wid = None
+                test_case_name = None
+
+            elif in_implicit_send_block:
+                # Match and extractWID and TC fields
+                wid_match = WID_REGEX.match(stripped)
+                tc_name_match = TC_NAME_REGEX.match(stripped)
+
+                if wid_match:
+                    wid = wid_match.group(1)
+                elif tc_name_match:
+                    test_case_name = tc_name_match.group(1)
+                elif stripped == "END OnImplicitSend":
+                    # End of block - store data if complete
+                    if wid and test_case_name:
+                        if '/' in test_case_name:
+                            profile = test_case_name.split('/')[0]
+                        else:
+                            profile = "UNKNOWN"
+                            logging.warning(f"Missing profile prefix in test_case_name: '{test_case_name}'")
+
+                        profile_wid_map[profile][wid].add(test_case_name)
+                    else:
+                        logging.error(
+                            "INCOMPLETE BLOCK:\n"
+                            f"  File           : {log_file.name}\n"
+                            f"  WID            : {wid!r}\n"
+                            f"  TestCase Name  : {test_case_name!r}"
+                        )
+                    in_implicit_send_block = False
+                    wid = None
+                    test_case_name = None
+
+    # Output results to CSV grouped by profile and wid
+    with OUTPUT_CSV_PATH.open('w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        for profile in sorted(profile_wid_map.keys()):
+            writer.writerow([f'{profile}'])
+            for wid in sorted(profile_wid_map[profile], key=lambda x: int(x)):
+                testcases = sorted(profile_wid_map[profile][wid])
+                testcases_combined = " ".join(testcases)
+                writer.writerow([wid, testcases_combined])
 
 
 def main():

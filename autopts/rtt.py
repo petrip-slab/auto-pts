@@ -17,12 +17,13 @@ import logging
 import os
 import re
 import signal
+import socket
 import subprocess
+import sys
 import threading
 import time
+
 import pylink
-import sys
-import socket
 
 from autopts.config import BTMON_PORT
 from autopts.utils import get_global_end
@@ -71,6 +72,10 @@ class RTT:
     def init_jlink(self, device_core, debugger_snr):
         if RTT.jlink:
             return
+
+        if not RTT.lib and (dllpath := os.environ.get("AUTOPTS_RTT_OVERRIDE_JLINK_DLLPATH")):
+            # Allow for the J-Link DLL to be specified
+            RTT.lib = pylink.library.Library(dllpath=dllpath)
 
         RTT.jlink = pylink.JLink(lib=RTT.lib)
         # Pylink loads a new cache of J-Link DLL at its __init__,
@@ -123,10 +128,10 @@ class BTMON:
         self.btmon_process = None
         self.socat_process = None
 
-    def _on_line_read_callback(self, bytes, user_data):
+    def _on_line_read_callback(self, data, user_data):
         sock, = user_data
         try:
-            sock.sendall(bytes)
+            sock.sendall(data)
         except UnicodeDecodeError:
             pass
 
@@ -196,18 +201,21 @@ class BTMON:
 
             self.rtt_reader.start(buffer_name, device_core, debugger_snr, self._on_line_read_callback, (sock,))
         else:
-            cmd = ['btmon', '-C', str(130), '-J', f'{device_core},{debugger_snr}',
-                   '-w', log_filename, '>', plain_log_filename]
+            cmd = f"btmon -C 130 -J {device_core},{debugger_snr} -w {log_filename} | grep -v '^= bt:' > {plain_log_filename}"
             self.btmon_process = subprocess.Popen(cmd, cwd=log_filecwd,
-                                                  shell=False,
+                                                  shell=True,
                                                   stdout=subprocess.PIPE,
-                                                  stderr=subprocess.PIPE)
+                                                  stderr=subprocess.PIPE,
+                                                  preexec_fn=os.setsid)
 
     def stop(self):
         log("%s.%s", self.__class__, self.stop.__name__)
         self.rtt_reader.stop()
 
         if self.btmon_process and self.btmon_process.poll() is None:
+            if sys.platform != 'win32':
+                os.killpg(os.getpgid(self.btmon_process.pid), signal.SIGTERM)
+
             self.btmon_process.terminate()
             self.btmon_process.wait()
             self.btmon_process = None
@@ -219,14 +227,15 @@ class BTMON:
 
 
 class RTTLogger:
-    def __init__(self):
+    def __init__(self, syncto=0):
         self.rtt_reader = RTT()
         self.log_file = None
+        self.syncto = syncto
 
-    def _on_line_read_callback(self, bytes, user_data):
+    def _on_line_read_callback(self, data, user_data):
         file, = user_data
         try:
-            file.write(bytes)
+            file.write(data)
             file.flush()
         except UnicodeDecodeError:
             pass
@@ -241,6 +250,8 @@ class RTTLogger:
 
     def stop(self):
         log("%s.%s", self.__class__, self.stop.__name__)
+        if self.syncto > 0:
+            time.sleep(self.syncto)
         self.rtt_reader.stop()
 
         if self.log_file:

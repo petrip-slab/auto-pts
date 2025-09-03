@@ -16,14 +16,13 @@
 """GAP test cases"""
 import binascii
 
-from autopts.pybtp import btp
-from autopts.pybtp.types import Addr, IOCap, AdType, AdFlags, Prop, Perm, UUID, UriScheme
-from autopts.pybtp.types import L2CAPConnectionResponse
 from autopts.client import get_unique_name
 from autopts.ptsprojects.stack import get_stack
 from autopts.ptsprojects.testcase import TestFunc
-from autopts.ptsprojects.zephyr.ztestcase import ZTestCase
 from autopts.ptsprojects.zephyr.gap_wid import gap_wid_hdl
+from autopts.ptsprojects.zephyr.ztestcase import ZTestCase
+from autopts.pybtp import btp
+from autopts.pybtp.types import UUID, Addr, AdFlags, AdType, IOCap, L2CAPConnectionResponse, Perm, Prop, UriScheme
 
 
 class SVC:
@@ -32,6 +31,7 @@ class SVC:
 
 class CHAR:
     name = (None, None, None, UUID.device_name)
+
 
 init_gatt_db = [TestFunc(btp.gatts_add_svc, 0, UUID.VND16_1),
                 TestFunc(btp.gatts_add_char, 0, Prop.read,
@@ -67,7 +67,7 @@ iut_appearance = '1111'
 iut_svc_data = '1111'
 iut_flags = '11'
 iut_svcs = '1111'
-iut_uri = UriScheme.https + 'github.com/auto-pts'.encode()
+iut_uri = UriScheme.https + b'github.com/auto-pts'
 iut_le_supp_feat = 'FF'
 
 br_psm = 0x1001
@@ -77,6 +77,8 @@ br_initial_mtu = 120
 # Ad data for periodic advertising in format (type, data)
 # Value: shortened name
 periodic_data = (0x08, "PADV_Tester")
+
+BROADCAST_CODE = '0102680553F1415AA265BBAFC6EA03B8'
 
 
 def set_pixits(ptses):
@@ -95,7 +97,6 @@ def set_pixits(ptses):
     pts.set_pixit("GAP", "TSPX_bd_addr_PTS", "C000DEADBEEF")
     pts.set_pixit("GAP", "TSPX_broadcaster_class_of_device", "100104")
     pts.set_pixit("GAP", "TSPX_observer_class_of_device", "100104")
-    pts.set_pixit("GAP", "TSPX_peripheral_class_of_device", "100104")
     pts.set_pixit("GAP", "TSPX_central_class_of_device", "100104")
     pts.set_pixit("GAP", "TSPX_security_enabled", "FALSE")
     pts.set_pixit("GAP", "TSPX_delete_link_key", "FALSE")
@@ -124,7 +125,7 @@ def set_pixits(ptses):
     pts.set_pixit("GAP", "TSPX_iut_valid_connection_interval_max", "03C0")
     pts.set_pixit("GAP", "TSPX_iut_valid_connection_latency", "0006")
     pts.set_pixit("GAP", "TSPX_iut_valid_timeout_multiplier", "0962")
-    pts.set_pixit("GAP", "TSPX_iut_connection_parameter_timeout", "30000")
+    pts.set_pixit("GAP", "TSPX_Tgap_conn_param_timeout", "30000")
     pts.set_pixit("GAP", "TSPX_iut_invalid_connection_interval_min", "0008")
     pts.set_pixit("GAP", "TSPX_iut_invalid_connection_interval_max", "00AA")
     pts.set_pixit("GAP", "TSPX_iut_invalid_connection_latency", "0000")
@@ -157,7 +158,7 @@ def set_pixits(ptses):
                   binascii.hexlify((chr(len(periodic_data[1]) + 1) + chr(periodic_data[0]) +
                                     periodic_data[1]).encode()))
     pts.set_pixit("GAP", "TSPX_Min_Encryption_Key_Size", "07")
-    pts.set_pixit("GAP", "TSPX_broadcast_code", "8ED03323D1205E2D58191BF6285C3182")
+    pts.set_pixit("GAP", "TSPX_broadcast_code", BROADCAST_CODE)
     pts.set_pixit("GAP", "TSPX_gap_iut_role", "Peripheral")
 
 
@@ -218,6 +219,7 @@ def test_cases(ptses):
         TestFunc(btp.core_reg_svc_gatt),
         TestFunc(stack.gatt_init),
         TestFunc(btp.gap_set_io_cap, IOCap.keyboard_display),
+        TestFunc(btp.gap_set_broadcast_code, BROADCAST_CODE),
 
         # We do this on test case, because previous one could update
         # this if RPA was used by PTS
@@ -229,6 +231,12 @@ def test_cases(ptses):
             "GAP", "TSPX_psm", format(br_psm, '04x'))),
         TestFunc(lambda: pts.update_pixit_param(
             "GAP", "TSPX_psm_2", format(br_psm_2, '04x'))),
+        TestFunc(lambda: pts.update_pixit_param(
+            "GAP", "TSPX_psm_sm4l2", format(br_psm, '04x'))),
+        TestFunc(lambda: pts.update_pixit_param(
+            "GAP", "TSPX_psm_sm4l3", format(br_psm, '04x'))),
+        TestFunc(lambda: pts.update_pixit_param(
+            "GAP", "TSPX_psm_sm4l4", format(br_psm, '04x'))),
         TestFunc(lambda: pts.update_pixit_param(
             "GAP", "TSPX_delete_link_key", "FALSE")),
         TestFunc(lambda: pts.update_pixit_param(
@@ -256,12 +264,12 @@ def test_cases(ptses):
                  L2CAPConnectionResponse.insufficient_secure_authentication),
     ]
 
-    br_l2cap_keysize = br_l2cap + [
+    br_l2cap_keysize = br_l2cap + [  # noqa: F841 # br_l2cap_keysize is not used
         TestFunc(btp.l2cap_br_listen, br_psm, br_initial_mtu,
                  L2CAPConnectionResponse.insufficient_encryption_key_size),
     ]
 
-    br_l2cap_author = br_l2cap + [
+    br_l2cap_author = br_l2cap + [  # noqa: F841 # br_l2cap_author is not used
         TestFunc(btp.l2cap_br_listen, br_psm, br_initial_mtu,
                  L2CAPConnectionResponse.insufficient_authorization),
     ]
@@ -310,7 +318,7 @@ def test_cases(ptses):
                   generic_wid_hdl=gap_wid_hdl),
         ZTestCase("GAP", "GAP/SEC/SEM/BV-50-C",
                   cmds=br_l2cap + [
-                      TestFunc(btp.gap_set_bondable_off),
+                      TestFunc(btp.gap_set_bondable_on),
                   ],
                   generic_wid_hdl=gap_wid_hdl),
         ZTestCase("GAP", "GAP/SEC/SEM/BV-06-C",
@@ -327,13 +335,13 @@ def test_cases(ptses):
                   generic_wid_hdl=gap_wid_hdl),
         ZTestCase("GAP", "GAP/SEC/SEM/BV-51-C",
                   cmds=br_l2cap + [
-                      TestFunc(btp.gap_set_bondable_off),
+                      TestFunc(btp.gap_set_bondable_on),
                       TestFunc(btp.gap_set_io_cap, IOCap.display_yesno),
                   ],
                   generic_wid_hdl=gap_wid_hdl),
         ZTestCase("GAP", "GAP/SEC/SEM/BV-52-C",
                   cmds=br_l2cap + [
-                      TestFunc(btp.gap_set_bondable_off),
+                      TestFunc(btp.gap_set_bondable_on),
                       TestFunc(btp.gap_set_io_cap, IOCap.display_yesno),
                   ],
                   generic_wid_hdl=gap_wid_hdl),
@@ -345,7 +353,7 @@ def test_cases(ptses):
                   generic_wid_hdl=gap_wid_hdl),
         ZTestCase("GAP", "GAP/SEC/SEM/BV-53-C",
                   cmds=br_l2cap + [
-                      TestFunc(btp.gap_set_bondable_off),
+                      TestFunc(btp.gap_set_bondable_on),
                       TestFunc(btp.gap_set_io_cap, IOCap.display_yesno),
                   ],
                   generic_wid_hdl=gap_wid_hdl),
@@ -592,6 +600,17 @@ def test_cases(ptses):
         ZTestCase("GAP", "GAP/SEC/SEM/BV-30-C",
                   cmds=br_l2cap + [
                       TestFunc(btp.gap_set_io_cap, IOCap.display_yesno),
+                  ],
+                  generic_wid_hdl=gap_wid_hdl),
+        ZTestCase("GAP", "GAP/DM/LEP/BV-07-C",
+                  cmds=br_pre_cond + [
+                      TestFunc(btp.gap_set_conn),
+                      TestFunc(btp.gap_set_gendiscov),
+                  ],
+                  generic_wid_hdl=gap_wid_hdl),
+        ZTestCase("GAP", "GAP/MOD/NBON/BV-02-C",
+                  cmds=br_pre_cond + [
+                      TestFunc(btp.gap_set_bondable_off),
                   ],
                   generic_wid_hdl=gap_wid_hdl),
     ]

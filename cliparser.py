@@ -4,6 +4,7 @@
 # auto-pts - The Bluetooth PTS Automation Framework
 #
 # Copyright (c) 2017, Intel Corporation.
+# Copyright (c) 2025, Atmosic.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms and conditions of the GNU General Public License,
@@ -18,12 +19,12 @@ import argparse
 import logging
 import os
 import time
-
 from distutils.spawn import find_executable
-from autopts.config import SERVER_PORT, CLIENT_PORT, MAX_SERVER_RESTART_TIME
-from autopts.ptsprojects.boards import tty_exists, com_to_tty, get_debugger_snr
+
+from autopts.config import CLIENT_PORT, MAX_SERVER_RESTART_TIME, SERVER_PORT
+from autopts.ptsprojects.boards import com_to_tty, get_debugger_snr, tty_exists
 from autopts.ptsprojects.testcase_db import DATABASE_FILE
-from autopts.utils import ykush_replug_usb, raise_on_global_end, active_hub_server_replug_usb
+from autopts.utils import active_hub_server_replug_usb, raise_on_global_end, ykush_replug_usb
 
 log = logging.debug
 
@@ -33,10 +34,16 @@ class CliParser(argparse.ArgumentParser):
         super().__init__(description='PTS automation client', add_help=add_help)
 
         self.add_argument("-i", "--ip_addr", nargs="+",
-                          help="IP address of the PTS automation servers")
+                          help="IP address of the PTS automation servers. "
+                          "If running with multiple servers(PTS dongles), "
+                          "specify the IP addresses separated by a space, "
+                          "e.g. \"-i 192.168.2.2 192.168.2.2\"")
 
         self.add_argument("-l", "--local_addr", nargs="+", default=None,
-                          help="Local IP address of PTS automation client")
+                          help="Local IP address of PTS automation client. "
+                          "If running with multiple servers(PTS dongles), "
+                          "specify the IP addresses separated by a space, "
+                          "e.g. \"-l 192.168.2.1 192.168.2.1\"")
 
         self.add_argument("-a", "--bd-addr",
                           help="Bluetooth device address of the IUT")
@@ -53,6 +60,10 @@ class CliParser(argparse.ArgumentParser):
                                "test cases can be specified by profile names."
                                 "Option can be used multiple times.")
 
+        self.add_argument("--test-cases-file", type=argparse.FileType('r'),
+                          help="A file with names of test cases to run. "
+                                "One test case per line. Use instead of -c option.")
+
         self.add_argument("-e", "--excluded", nargs='+', default=[],
                           help="Names of test cases to exclude. Groups of "
                                "test cases can be specified by profile names")
@@ -64,14 +75,23 @@ class CliParser(argparse.ArgumentParser):
                           help="Repeat test if failed. Parameter specifies "
                                "maximum repeat count per test")
 
+        self.add_argument("--repeat_until_fail", action='store_true', default=False,
+                          help="Repeat test case until non-pass verdict")
+
         self.add_argument("--stress_test", action='store_true', default=False,
                           help="Repeat every test even if previous result was PASS")
 
         self.add_argument("-S", "--srv_port", type=int, nargs="+", default=[SERVER_PORT],
-                          help="Specify the server port number")
+                          help="Specify the server port number. "
+                          "If running with multiple servers(PTS dongles), "
+                          "specify the ports separated by a space, "
+                          "e.g. \"-S 65000 65002 65004\"")
 
         self.add_argument("-C", "--cli_port", type=int, nargs="+", default=[CLIENT_PORT],
-                          help="Specify the client port number")
+                          help="Specify the client port number. "
+                          "If running with multiple servers(PTS dongles), "
+                          "specify the ports separated by a space, "
+                          "e.g. \"-C 65001 65003 65005\"")
 
         self.add_argument("--recovery", action='store_true', default=False,
                           help="Specify if autoptsclient should try to recover"
@@ -92,6 +112,13 @@ class CliParser(argparse.ArgumentParser):
 
         self.add_argument("--pylink_reset", action='store_true', default=False,
                           help="Use pylink reset.")
+
+        self.add_argument('--nc', dest='copy', action='store_false',
+                          help='Do not copy workspace, open original one. '
+                               'Warning: workspace file might be modified', default=True)
+
+        self.add_argument("--rtscts", dest='rtscts', action="store_true", default=False,
+                          help="Enable UART hardware flow control.")
 
         # Hidden option to save test cases data in TestCase.db
         self.add_argument("-s", "--store", action="store_true",
@@ -132,6 +159,13 @@ class CliParser(argparse.ArgumentParser):
                                    "with OS running on hardware will be done over "
                                    "this TTY. Hence, QEMU will not be used.")
 
+            self.add_argument("--net-tty-file", dest='net_tty_file', type=str, default=None,
+                              help="This can be used to log output from network core of IUT "
+                                   "(if additional port is available). Value should match "
+                                   "the COM/tty file port that outputs log from the network core. "
+                                   "There's no indication which COM port maps to the network "
+                                   "core.")
+
             self.add_argument("-j", "--jlink", dest="debugger_snr", type=str, default=None,
                               help="Specify jlink serial number manually.")
 
@@ -154,6 +188,11 @@ class CliParser(argparse.ArgumentParser):
                               help="Capture iut logs from device over RTT. "
                               "Requires rtt support on IUT.",
                               action='store_true', default=False)
+
+            self.add_argument("--rtt-log-syncto",
+                              help="Specify the number of seconds that the RTT logging"
+                              "should continue after the test has finished executing.",
+                              type=float, default=0)
 
             self.add_argument("--gdb",
                               help="Skip board resets to avoid gdb server disconnection.",
@@ -207,13 +246,13 @@ class CliParser(argparse.ArgumentParser):
                 args.debugger_snr = get_debugger_snr(args.tty_file)
 
         if not tty_exists(args.tty_file):
-            return 'TTY mode: {} serial port does not exist!\n'.format(repr(args.tty_file))
+            return f'TTY mode: {repr(args.tty_file)} serial port does not exist!\n'
 
         if args.tty_file.startswith("COM"):
             try:
                 args.tty_file = com_to_tty(args.tty_file)
             except ValueError:
-                return 'TTY mode: Port {} is not a valid COM port!\n'.format(args.tty_file)
+                return f'TTY mode: Port {args.tty_file} is not a valid COM port!\n'
 
         return ''
 
@@ -221,10 +260,10 @@ class CliParser(argparse.ArgumentParser):
         msg = ''
 
         if args.qemu_bin and not find_executable(args.qemu_bin):
-            msg += 'QEMU mode: {} is needed but not found!\n'.format(args.qemu_bin)
+            msg += f'QEMU mode: {args.qemu_bin} is needed but not found!\n'
 
         if args.kernel_image is None or not os.path.isfile(args.kernel_image):
-            msg += 'QEMU mode: kernel_image {} is not a file!\n'.format(repr(args.kernel_image))
+            msg += f'QEMU mode: kernel_image {repr(args.kernel_image)} is not a file!\n'
 
         return msg
 
@@ -233,8 +272,7 @@ class CliParser(argparse.ArgumentParser):
             return 'HCI mode: hci port was not specified!\n'
 
         if args.kernel_image is None or not os.path.isfile(args.kernel_image):
-            return 'HCI mode: kernel_image {} is not a file!\n'.format(
-                repr(args.kernel_image))
+            return f'HCI mode: kernel_image {repr(args.kernel_image)} is not a file!\n'
 
         args.sudo = True
 
@@ -242,15 +280,18 @@ class CliParser(argparse.ArgumentParser):
 
     def check_args_btpclient_path(self, args):
         if not os.path.exists(args.btpclient_path):
-            return 'btpclient: Path {} of btp client ' \
-                   ' does not exist!\n'.format(repr(args.btpclient_path))
-
+            return (
+                f'btpclient: Path {repr(args.btpclient_path)} of btp client '
+                'does not exist!\n'
+            )
         return ''
 
     def check_args_btp_tcp(self, args):
         if not 49152 <= args.btp_tcp_port <= 65535:
-            return 'btp_tcp mode: Invalid server port number={}, expected' \
-                   ' range <49152,65535>'.format(args.btp_tcp_port)
+            return (
+                f'btp_tcp mode: Invalid server port number={args.btp_tcp_port}, expected '
+                'range <49152,65535>'
+            )
         return ''
 
     def parse(self, arg_ns=None):
@@ -277,7 +318,7 @@ class CliParser(argparse.ArgumentParser):
             args.local_addr = ['127.0.0.1'] * len(args.cli_port)
 
         for cli in self.cli_support:
-            check_method = getattr(self, 'check_args_{}'.format(cli))
+            check_method = getattr(self, f'check_args_{cli}')
             msg = check_method(args)
 
             if msg != '':

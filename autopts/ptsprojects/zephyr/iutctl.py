@@ -2,6 +2,7 @@
 # auto-pts - The Bluetooth PTS Automation Framework
 #
 # Copyright (c) 2017, Intel Corporation.
+# Copyright (c) 2025, Atmosic.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms and conditions of the GNU General Public License,
@@ -13,21 +14,21 @@
 # more details.
 #
 
+import logging
+import os
+import shlex
 import socket
 import subprocess
-import os
-import logging
-import shlex
 import sys
 import time
+
 import serial
 
-from autopts.pybtp import defs
 from autopts.ptsprojects.boards import Board, get_debugger_snr, tty_to_com
-from autopts.pybtp.types import BTPError
-from autopts.pybtp.iutctl_common import BTPSocketSrv, BTPWorker, BTP_ADDRESS
-from autopts.rtt import RTTLogger, BTMON
 from autopts.ptsprojects.stack import get_stack
+from autopts.pybtp import defs
+from autopts.pybtp.iutctl_common import BTP_ADDRESS, BTPSocketSrv, BTPWorker, LoggerWorker
+from autopts.rtt import BTMON, RTTLogger
 from autopts.utils import get_global_end
 
 log = logging.debug
@@ -36,7 +37,7 @@ ZEPHYR = None
 # qemu binary should be installed in shell PATH
 QEMU_BIN = "qemu-system-arm"
 
-SERIAL_BAUDRATE = 115200
+SERIAL_BAUDRATE = int(os.getenv("AUTOPTS_SERIAL_BAUDRATE", "115200"))
 CLI_SUPPORT = ['tty', 'hci', 'qemu']
 
 
@@ -45,12 +46,13 @@ def get_qemu_cmd(kernel_image):
 
     kernel_image -- Path to Zephyr kernel image"""
 
-    qemu_cmd = ("%s -cpu cortex-m3 -machine lm3s6965evb -nographic "
-                "-serial mon:stdio "
-                "-serial unix:%s "
-                "-serial unix:/tmp/bt-server-bredr "
-                "-kernel %s" %
-                (QEMU_BIN, BTP_ADDRESS, kernel_image))
+    qemu_cmd = (
+        f"{QEMU_BIN} -cpu cortex-m3 -machine lm3s6965evb -nographic "
+        f"-serial mon:stdio "
+        f"-serial unix:{BTP_ADDRESS} "
+        f"-serial unix:/tmp/bt-server-bredr "
+        f"-kernel {kernel_image}"
+    )
 
     return qemu_cmd
 
@@ -69,6 +71,7 @@ class ZephyrCtl:
         self.debugger_snr = args.debugger_snr
         self.kernel_image = args.kernel_image
         self.tty_file = args.tty_file
+        self.net_tty_file = args.net_tty_file
         self.hci = args.hci
         self.native = None
         self.gdb = args.gdb
@@ -90,10 +93,12 @@ class ZephyrCtl:
         self.iut_log_file = None
         self.rtt_logger = None
         self.btmon = None
+        self.uart_logger = None
+        self.rtscts = args.rtscts
 
         if self.debugger_snr:
             self.btp_address = BTP_ADDRESS + self.debugger_snr
-            self.rtt_logger = RTTLogger() if args.rtt_log else None
+            self.rtt_logger = RTTLogger(args.rtt_log_syncto) if args.rtt_log else None
             self.btmon = BTMON() if args.btmon else None
         else:
             self.btp_address = BTP_ADDRESS
@@ -109,26 +114,36 @@ class ZephyrCtl:
         # We will reset HW after BTP socket is open. If the board was
         # reset before this happened, it is possible to receive none,
         # partial or whole IUT ready event. Flush serial to ignore it.
-        self.flush_serial()
+        self.flush_serial(self.rtscts)
 
         self.socket_srv = BTPSocketSrv(test_case.log_dir)
         self.socket_srv.open(self.btp_address)
         self.btp_socket = BTPWorker(self.socket_srv)
+        flow_control = "crtscts" if self.rtscts else ""
 
         if self.tty_file:
             if sys.platform == "win32":
                 # On windows socat.exe does not support setting serial baud rate.
                 # Set it with 'mode' from cmd.exe
                 com = tty_to_com(self.tty_file)
-                mode_cmd = (">nul 2>nul cmd.exe /c \"mode " + com + "BAUD=115200 PARITY=n DATA=8 STOP=1\"")
+                # RTS=HS -> (Hardware Handshaking)
+                # RTS=OFF
+                handshake_mode = "hs" if self.rtscts else "off"
+                mode_cmd = (
+                    f'>nul 2>nul cmd.exe /c "mode {com} '
+                    f'BAUD={SERIAL_BAUDRATE} PARITY=n DATA=8 STOP=1 RTS={handshake_mode}"'
+                )
                 os.system(mode_cmd)
 
-                socat_cmd = ("socat.exe -x -v tcp:" + socket.gethostbyname(socket.gethostname()) +
-                             ":%s,retry=100,interval=1 %s,raw,b115200" %
-                             (self.socket_srv.sock.getsockname()[1], self.tty_file))
+                socat_cmd = (
+                    f"socat.exe -x -v tcp:{socket.gethostbyname(socket.gethostname())}:"
+                    f"{self.socket_srv.sock.getsockname()[1]},retry=100,interval=1 "
+                    f"{self.tty_file},raw,b{SERIAL_BAUDRATE},{flow_control}"
+                )
             else:
-                socat_cmd = ("socat -x -v %s,rawer,b115200 UNIX-CONNECT:%s" %
-                             (self.tty_file, self.btp_address))
+                socat_cmd = (
+                    f"socat -x -v {self.tty_file},rawer,b{SERIAL_BAUDRATE},{flow_control} UNIX-CONNECT:{self.btp_address}"
+                )
 
             log("Starting socat process: %s", socat_cmd)
 
@@ -138,12 +153,13 @@ class ZephyrCtl:
                                                   stdout=subprocess.DEVNULL,
                                                   stderr=subprocess.DEVNULL)
         elif self.hci is not None:
-            self.iut_log_file = open(os.path.join(test_case.log_dir, "autopts-iutctl-zephyr.log"), "a")
-            socat_cmd = ("socat -x -v %%s,rawer,b115200 UNIX-CONNECT:%s &" %
-                         self.btp_address)
+            self.iut_log_file = open(test_case.log_dir / "autopts-iutctl-zephyr.log", "a")
+            socat_cmd = f"socat -x -v %%s,rawer,b{SERIAL_BAUDRATE},{flow_control} UNIX-CONNECT:{self.btp_address} &"
 
-            native_cmd = ("%s --bt-dev=hci%d --attach_uart_cmd=\"%s\"" %
-                          (self.kernel_image, self.hci, socat_cmd))
+            native_cmd = (
+                f"{self.kernel_image} --bt-dev=hci{self.hci} "
+                f'--attach_uart_cmd="{socat_cmd}"'
+            )
 
             log("Starting native zephyr process: %s", native_cmd)
 
@@ -153,7 +169,7 @@ class ZephyrCtl:
                                                    stdout=self.iut_log_file,
                                                    stderr=self.iut_log_file)
         else:
-            self.iut_log_file = open(os.path.join(test_case.log_dir, "autopts-iutctl-zephyr.log"), "a")
+            self.iut_log_file = open(test_case.log_dir / "autopts-iutctl-zephyr.log", "a")
             qemu_cmd = get_qemu_cmd(self.kernel_image)
 
             log("Starting QEMU zephyr process: %s", qemu_cmd)
@@ -166,7 +182,12 @@ class ZephyrCtl:
 
         self.btp_socket.accept()
 
-    def flush_serial(self):
+        if self.net_tty_file:
+            self.uart_logger = LoggerWorker(self.net_tty_file, SERIAL_BAUDRATE,
+                                            self.test_case.log_dir)
+            self.uart_logger.start()
+
+    def flush_serial(self, rtscts=False):
         log("%s.%s", self.__class__, self.flush_serial.__name__)
         # Try to read data or timeout
         try:
@@ -180,7 +201,9 @@ class ZephyrCtl:
             # BTPWorker/BTPSocket. Although we can still use it for
             # flushing serial if the data does not matter.
             ser = serial.Serial(port=tty,
-                                baudrate=SERIAL_BAUDRATE, timeout=1)
+                                baudrate=SERIAL_BAUDRATE,
+                                rtscts=rtscts,
+                                timeout=1)
             ser.read(99999)
             ser.close()
         except serial.SerialException:
@@ -272,6 +295,9 @@ class ZephyrCtl:
         if self.btp_socket:
             self.btp_socket.close()
             self.btp_socket = None
+
+        if self.uart_logger:
+            self.uart_logger.close()
 
         if self.native_process and self.native_process.poll() is None:
             self.native_process.terminate()

@@ -52,6 +52,8 @@ iut_config = {
             'GAP/CONN/ACEP/BV-04-C',
             'GAP/CONN/DCEP/BV-05-C',
             'GAP/CONN/DCEP/BV-06-C',
+            'GAP/CONN/DCON/BV-04-C',
+            'GAP/CONN/DCON/BV-05-C',
             'GAP/CONN/GCEP/BV-05-C',
             'GAP/CONN/GCEP/BV-06-C',
             'GAP/CONN/SCEP/BV-03-C',
@@ -89,6 +91,7 @@ iut_config = {
             'BLE_SM_SC': '1',
             'BLE_SM_SC_ONLY': '0',
             'BLE_SM_LVL': '2',
+            'BTTESTER_LEAUDIO': '0',
         },
         "test_cases": [
             'GAP/SEC/SEM/BV-37-C',

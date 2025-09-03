@@ -14,7 +14,35 @@
 # more details.
 #
 import logging
-from autopts.ptsprojects.stack.layers import *
+
+from autopts.ptsprojects.stack.layers.aics import AICS
+from autopts.ptsprojects.stack.layers.ascs import ASCS
+from autopts.ptsprojects.stack.layers.bap import BAP
+from autopts.ptsprojects.stack.layers.cap import CAP
+from autopts.ptsprojects.stack.layers.ccp import CCP
+from autopts.ptsprojects.stack.layers.core import CORE
+from autopts.ptsprojects.stack.layers.csip import CSIP
+from autopts.ptsprojects.stack.layers.gap import Gap
+from autopts.ptsprojects.stack.layers.gatt import Gatt
+from autopts.ptsprojects.stack.layers.gattcl import GattCl
+from autopts.ptsprojects.stack.layers.gmcs import GMCS
+from autopts.ptsprojects.stack.layers.gtbs import GTBS
+from autopts.ptsprojects.stack.layers.hap import HAP
+from autopts.ptsprojects.stack.layers.ias import IAS
+from autopts.ptsprojects.stack.layers.l2cap import L2cap
+from autopts.ptsprojects.stack.layers.mcp import MCP
+from autopts.ptsprojects.stack.layers.mesh import Mesh
+from autopts.ptsprojects.stack.layers.micp import MICP
+from autopts.ptsprojects.stack.layers.mics import MICS
+from autopts.ptsprojects.stack.layers.ots import OTS
+from autopts.ptsprojects.stack.layers.pacs import PACS
+from autopts.ptsprojects.stack.layers.pbp import PBP
+from autopts.ptsprojects.stack.layers.sdp import SDP
+from autopts.ptsprojects.stack.layers.tbs import TBS
+from autopts.ptsprojects.stack.layers.tmap import TMAP
+from autopts.ptsprojects.stack.layers.vcp import VCP
+from autopts.ptsprojects.stack.layers.vcs import VCS
+from autopts.ptsprojects.stack.layers.vocs import VOCS
 from autopts.ptsprojects.stack.synch import Synch
 from autopts.pybtp import common
 
@@ -55,6 +83,7 @@ class Stack:
         self.tmap = None
         self.ots = None
         self.pbp = None
+        self.sdp = None
         # GENERATOR append 2
         self.supported_svcs_cmds = common.supported_svcs_cmds
 
@@ -159,6 +188,9 @@ class Stack:
     def pbp_init(self):
         self.pbp = PBP()
 
+    def sdp_init(self):
+        self.sdp = SDP()
+
     # GENERATOR append 3
 
     def cleanup(self):
@@ -191,7 +223,7 @@ class Stack:
 
         if self.micp:
             self.micp_init()
-            
+
         if self.ccp:
             self.ccp_init()
 
@@ -242,6 +274,9 @@ class Stack:
 
         if self.pbp:
             self.pbp_init()
+
+        if self.sdp:
+            self.sdp_init()
 
         # GENERATOR append 4
 

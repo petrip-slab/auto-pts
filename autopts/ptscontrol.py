@@ -33,23 +33,25 @@
 Cause of tight coupling with PTS, this module is Windows specific
 """
 
-import os
-import time
-import shutil
-import xmlrpc.client
 import ctypes
+import logging as root_logging
+import os
+import shutil
 import threading
+import time
+import xmlrpc.client
+from datetime import datetime
+from pathlib import Path
+
+import psutil
+import pythoncom
 import win32com.client
 import win32com.server.connect
 import win32com.server.util
-import pythoncom
-import psutil
-import logging as root_logging
-from datetime import datetime
-from pathlib import Path
+
 from autopts.ptsprojects import ptstypes
 from autopts.ptsprojects.ptstypes import E_FATAL_ERROR
-from autopts.utils import PTS_WORKSPACE_FILE_EXT, get_own_workspaces, count_script_instances, ResultWithFlag
+from autopts.utils import PTS_WORKSPACE_FILE_EXT, ResultWithFlag, count_script_instances, get_own_workspaces
 from autopts.winutils import get_pid_by_window_title, kill_all_processes
 
 logging = root_logging.getLogger('server')
@@ -172,7 +174,7 @@ class PTSLogger(win32com.server.connect.ConnectableServer):
                         elif "FAIL" in log_message:
                             new_status = "FAIL"
                         else:
-                            new_status = "UNKNOWN VERDICT: %s" % log_message.strip()
+                            new_status = f"UNKNOWN VERDICT: {log_message.strip()}"
 
                         self._tc_status.set(new_status)
                         log(f"Final verdict found: {self._test_case_name} {new_status}")
@@ -511,6 +513,8 @@ class PyPTS:
 
         log("restart_pts")
         exception = 0
+        dongle_init_retry = getattr(args, "dongle_init_retry", 5)
+
         while not self._end.is_set():
             try:
                 self.stop_pts()
@@ -528,13 +532,13 @@ class PyPTS:
                 # the only running instance of autoptsserver.py
                 if count_script_instances('autoptsserver.py') <= 1:
                     kill_all_processes('PTS.exe')
-                if args.dongle_init_retry == 0:
+                if dongle_init_retry == 0:
                     continue
                 exception += 1
-                if exception >= args.dongle_init_retry:
+                if exception >= dongle_init_retry:
                     # This stops PTS from restarting indefinitely when PTS
                     # dongle is unplugged
-                    print(f"Please check your dongle connection! Aborting")
+                    print("Please check your dongle connection! Aborting")
                     kill_all_processes('PTS.exe')
                     self.terminate()
                     break
@@ -581,7 +585,7 @@ class PyPTS:
 
         log("PTS Version: %s", self.get_version())
         log(f'PTS Bluetooth Address: {self.get_bluetooth_address()}')
-        log("PTS BD_ADDR: %s" % self.bd_addr())
+        log(f"PTS BD_ADDR: {self.bd_addr()}")
         log(f'PTS daemon PID: {self._get_process_pid()}')
 
         self._ready = True
@@ -594,15 +598,15 @@ class PyPTS:
         self._ready = False
 
         if self._pts_logger:
-            log(f"Closing PTSLogger")
-            log(f"Closing PTSSender")
+            log("Closing PTSLogger")
+            log("Closing PTSSender")
             # No new calls to the PTS callbacks after closing
             self._pts_logger.close()
             self._pts_sender.close()
 
             # Wait until the PTS callbacks are out of fn call to decrease
             # a chance of breaking the log file handler lock
-            for i in range(10):
+            for _i in range(10):
                 if not self._pts_logger.in_call and not self._pts_sender.in_call:
                     break
                 time.sleep(1)
@@ -638,9 +642,9 @@ class PyPTS:
                     self._pts_proc = None
             else:
                 try:
-                    log(f"Terminating with ExitPTS command")
+                    log("Terminating with ExitPTS command")
                     self._pts.ExitPTS()
-                except Exception as e:
+                except Exception:
                     # The COM timeout exception is a valid behavior here,
                     # since the PTS closes itself within ExitPTS(). It takes
                     # exactly 5 seconds to receive the exception, because
@@ -669,7 +673,7 @@ class PyPTS:
             os.remove(self._temp_workspace_path)
 
     @pts_lock_wrapper(PTS_START_LOCK)
-    def open_workspace(self, workspace_path):
+    def open_workspace(self, workspace_path, copy=False):
         """Opens existing workspace"""
 
         log(f"open_workspace {workspace_path}")
@@ -683,35 +687,38 @@ class PyPTS:
             log("Using %s workspace: %s", workspace_name, workspace_path)
 
         if not os.path.isfile(workspace_path):
-            raise Exception("Workspace file '%s' does not exist" %
-                            (workspace_path,))
+            raise Exception(f"Workspace file '{workspace_path}' does not exist")
 
         specified_ext = os.path.splitext(workspace_path)[1]
         if PTS_WORKSPACE_FILE_EXT != specified_ext:
             raise Exception(
-                "Workspace file '%s' extension is wrong, should be %s" %
-                (workspace_path, PTS_WORKSPACE_FILE_EXT))
+                f"Workspace file '{workspace_path}' extension is wrong, should be {PTS_WORKSPACE_FILE_EXT}"
+            )
 
         # Workaround CASE0044114 PTS issue
         # Do not open original workspace file that can become broken by
         # TestCase. Instead use a copy of this file
-        if self._temp_workspace_path and \
-                os.path.exists(self._temp_workspace_path):
-            os.unlink(self._temp_workspace_path)
+        if copy:
+            if self._temp_workspace_path and \
+                    os.path.exists(self._temp_workspace_path):
+                os.unlink(self._temp_workspace_path)
 
-        workspace_dir = os.path.dirname(workspace_path)
-        workspace_name = os.path.basename(workspace_path)
+            workspace_dir = os.path.dirname(workspace_path)
+            workspace_name = os.path.basename(workspace_path)
 
-        temp_workspace_dir = os.path.join(workspace_dir, "_" + self.get_bluetooth_address())
-        Path(temp_workspace_dir).mkdir(parents=False, exist_ok=True)
+            temp_workspace_dir = os.path.join(workspace_dir, "_" + self.get_bluetooth_address())
+            Path(temp_workspace_dir).mkdir(parents=False, exist_ok=True)
 
-        self._temp_workspace_path = \
-            os.path.join(temp_workspace_dir, "temp_" + workspace_name)
-        shutil.copy2(workspace_path, self._temp_workspace_path)
-        log("Using temporary workspace: %s", self._temp_workspace_path)
+            self._temp_workspace_path = \
+                os.path.join(temp_workspace_dir, "temp_" + workspace_name)
+            shutil.copy2(workspace_path, self._temp_workspace_path)
+            log("Using temporary workspace: %s", self._temp_workspace_path)
 
-        self._pts.OpenWorkspace(self._temp_workspace_path)
-        self.add_recov(self.open_workspace, workspace_path)
+            self._pts.OpenWorkspace(self._temp_workspace_path)
+        else:
+            self._pts.OpenWorkspace(workspace_path)
+
+        self.add_recov(self.open_workspace, workspace_path, copy)
         self._cache_test_cases()
 
     def _cache_test_cases(self):
@@ -806,7 +813,7 @@ class PyPTS:
             # PTS server can detect that the PTS dongle had been corrupted
             # by calling GetPTSBluetoothAddress() before test case started.
             address = None
-            for i in range(10):
+            for _i in range(10):
                 try:
                     address = self._pts.GetPTSBluetoothAddress()
                     log(f"GetPTSBluetoothAddress(): {address}")
@@ -1007,7 +1014,7 @@ class PyPTS:
         pts_window_title = f'PTS - {address.upper()}'
         pid = None
 
-        for i in range(retry):
+        for _i in range(retry):
             pid = get_pid_by_window_title(pts_window_title)
 
             if pid is None:
@@ -1045,7 +1052,7 @@ class PyPTS:
         address = None
         if self._device:
             # The dongle already connected. Try to read the address.
-            for i in range(10):
+            for _i in range(10):
                 try:
                     # As described in the PTS CONTROL API documentation, the
                     # GetPTSBluetoothAddress() may not be immediately available
@@ -1091,7 +1098,7 @@ class PyPTS:
             device_to_connect = selected_device.replace(r'InUse', r'Free')
         else:
             # The selected_device should be empty string here.
-            log(f'First random dongle selection')
+            log('First random dongle selection')
 
         if device_to_connect and device_to_connect == selected_device.replace(r'InUse', r'Free'):
             log(f'PTS already connected to the right dongle: {device_to_connect}')
@@ -1099,7 +1106,7 @@ class PyPTS:
             self._device = device_to_connect
             return address
 
-        for i in range(4):
+        for _i in range(4):
             try:
                 port = self._get_connectable_dongle(device_to_connect)
                 if not port:
@@ -1119,7 +1126,7 @@ class PyPTS:
                 self._disconnect_dongle()
 
         if not address:
-            raise Exception(f'Failed to connect dongle after 4 iterations')
+            raise Exception('Failed to connect dongle after 4 iterations')
 
         return address
 

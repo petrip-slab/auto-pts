@@ -2,6 +2,7 @@
 # auto-pts - The Bluetooth PTS Automation Framework
 #
 # Copyright (c) 2017, Intel Corporation.
+# Copyright 2025 NXP
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms and conditions of the GNU General Public License,
@@ -13,14 +14,14 @@
 # more details.
 #
 
-import subprocess
 import logging
 import shlex
 import socket
+import subprocess
 
 from autopts.pybtp import defs
+from autopts.pybtp.iutctl_common import BTP_ADDRESS, BTPSocketSrv, BTPWorker
 from autopts.pybtp.types import BTPError
-from autopts.pybtp.iutctl_common import BTPSocketSrv, BTPWorker, BTP_ADDRESS
 
 log = logging.debug
 IUT = None
@@ -33,7 +34,7 @@ CLI_SUPPORT = ['btpclient_path']
 def get_iut_cmd(btpclient_path):
     """Returns command to start IUT"""
 
-    iut_cmd = ("%s -s %s" % (btpclient_path, BTP_ADDRESS))
+    iut_cmd = f"{btpclient_path} -s {BTP_ADDRESS}"
 
     return iut_cmd
 
@@ -52,11 +53,11 @@ class IUTCtl:
         self.socket_srv = None
         self.iut_process = None
 
-    def start(self):
+    def start(self, test_case):
         """Starts the IUT"""
 
         log("%s.%s", self.__class__, self.start.__name__)
-        self.socket_srv = BTPSocketSrv()
+        self.socket_srv = BTPSocketSrv(test_case.log_dir)
         self.socket_srv.open(self.btp_address)
         self.btp_socket = BTPWorker(self.socket_srv)
 

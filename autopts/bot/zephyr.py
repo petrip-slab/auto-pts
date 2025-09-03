@@ -5,6 +5,7 @@
 #
 # Copyright (c) 2018, Intel Corporation.
 # Copyright (c) 2021, Nordic Semiconductor ASA.
+# Copyright (c) 2025, Atmosic.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms and conditions of the GNU General Public License,
@@ -17,26 +18,25 @@
 #
 
 import importlib
-import logging
 import os
 import sys
 import time
 import traceback
-import serial
 from pathlib import Path
 
+import serial
+
 from autopts import bot
-from autopts.ptsprojects.zephyr import ZEPHYR_PROJECT_URL
 from autopts import client as autoptsclient
-from autopts.bot.common import BotConfigArgs, BotClient, BuildAndFlashException
-from autopts.ptsprojects.boards import tty_to_com, get_build_and_flash, get_board_type
+from autopts.bot.common import BotClient, BotConfigArgs, BuildAndFlashException
+from autopts.ptsprojects.boards import get_board_type, get_build_and_flash, tty_to_com
+from autopts.ptsprojects.zephyr import ZEPHYR_PROJECT_URL
 from autopts.ptsprojects.zephyr.iutctl import get_iut, log
-from autopts.bot.common_features import report
 
 PROJECT_NAME = Path(__file__).stem
 
 
-def flush_serial(tty):
+def flush_serial(tty, rtscts=False):
     """Clear the serial port buffer
     :param tty: file path of the terminal
     :return: None
@@ -46,7 +46,10 @@ def flush_serial(tty):
 
     if sys.platform == 'win32':
         com = tty_to_com(tty)
-        ser = serial.Serial(com, 115200, timeout=5)
+        ser = serial.Serial(com,
+                            int(os.getenv("AUTOPTS_SERIAL_BAUDRATE", "115200")),
+                            rtscts=rtscts,
+                            timeout=5)
         ser.flushInput()
         ser.flushOutput()
     else:
@@ -71,7 +74,7 @@ def apply_overlay(zephyr_wd, cfg_name, overlay):
 
     with open(cfg_name, 'w') as config:
         for k, v in list(overlay.items()):
-            config.write("{}={}\n".format(k, v))
+            config.write(f"{k}={v}\n")
 
     os.chdir(cwd)
 
@@ -81,8 +84,7 @@ def zephyr_hash_url(commit):
     :param commit: Commit ID to append
     :return: URL of commit
     """
-    return "{}/commit/{}".format(ZEPHYR_PROJECT_URL,
-                                 commit)
+    return f"{ZEPHYR_PROJECT_URL}/commit/{commit}"
 
 
 class ZephyrBotConfigArgs(BotConfigArgs):
@@ -106,11 +108,11 @@ class ZephyrBotClient(BotClient):
 
     def apply_config(self, args, config, value):
         pre_overlay = value.get('pre_overlay', [])
-        if type(pre_overlay) == str:
+        if isinstance(pre_overlay, str):
             pre_overlay = [pre_overlay]
 
         post_overlay = value.get('post_overlay', [])
-        if type(post_overlay) == str:
+        if isinstance(post_overlay, str):
             post_overlay = [post_overlay]
 
         configs = []
@@ -128,7 +130,7 @@ class ZephyrBotClient(BotClient):
         # The order is used in the -DEXTRA_CONF_FILE="<overlay1>;<...>" option.
         overlays = ';'.join(configs)
 
-        log("TTY path: %s" % args.tty_file)
+        log(f"TTY path: {args.tty_file}")
 
         if not args.no_build:
             build_and_flash = get_build_and_flash(args.board_name)
@@ -136,13 +138,13 @@ class ZephyrBotClient(BotClient):
 
             try:
                 build_and_flash(args.project_path, board_type, args.debugger_snr,
-                                overlays, args.project_repos)
+                                overlays, args.project_repos, args.build_env_cmd)
 
-                flush_serial(args.tty_file)
+                flush_serial(args.tty_file, rtscts=args.rtscts)
             except BaseException as e:
                 traceback.print_exception(e)
-                report.make_error_txt('Build and flash step failed', self.file_paths['ERROR_TXT_FILE'])
-                raise BuildAndFlashException
+                self.error_txt_content += "Build and flash step failed\n"
+                raise BuildAndFlashException from e
 
             time.sleep(10)
 

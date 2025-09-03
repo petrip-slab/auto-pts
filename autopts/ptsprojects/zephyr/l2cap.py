@@ -15,19 +15,21 @@
 
 """L2CAP test cases"""
 
-from autopts.pybtp import btp
-from autopts.pybtp.types import Addr, L2CAPConnectionResponse
 from autopts.client import get_unique_name
-from autopts.wid import l2cap_wid_hdl
 from autopts.ptsprojects.stack import get_stack
 from autopts.ptsprojects.testcase import TestFunc
 from autopts.ptsprojects.zephyr.ztestcase import ZTestCase
-
+from autopts.pybtp import btp, defs
+from autopts.pybtp.types import Addr, IOCap, L2CAPConnectionResponse
+from autopts.wid import l2cap_wid_hdl
 
 le_psm = 128
 psm_unsupported = 241
 le_initial_mtu = 120
 le_initial_mtu_equal_mps = 96
+
+br_psm = 0x1001
+br_initial_mtu = 120
 
 
 def set_pixits(ptses):
@@ -42,19 +44,12 @@ def set_pixits(ptses):
     pts = ptses[0]
 
     pts.set_pixit("L2CAP", "TSPX_bd_addr_iut", "DEADBEEFDEAD")
-    pts.set_pixit("L2CAP", "TSPX_bd_addr_iut_le", "DEADBEEFDEAD")
-    pts.set_pixit("L2CAP", "TSPX_client_class_of_device", "100104")
-    pts.set_pixit("L2CAP", "TSPX_server_class_of_device", "100104")
     pts.set_pixit("L2CAP", "TSPX_security_enabled", "FALSE")
     pts.set_pixit("L2CAP", "TSPX_delete_link_key", "FALSE")
     pts.set_pixit("L2CAP", "TSPX_pin_code", "0000")
     pts.set_pixit("L2CAP", "TSPX_delete_ltk", "FALSE")
-    pts.set_pixit("L2CAP", "TSPX_flushto", "FFFF")
     pts.set_pixit("L2CAP", "TSPX_l2ca_inmtu", "02A0")
-    pts.set_pixit("L2CAP", "TSPX_no_fail_verdicts", "FALSE")
     pts.set_pixit("L2CAP", "TSPX_iut_supported_max_channels", "5")
-    pts.set_pixit("L2CAP", "TSPX_IUT_mps", "0030")
-    pts.set_pixit("L2CAP", "TSPX_outmtu", "02A0")
     pts.set_pixit("L2CAP", "TSPX_tester_mps", "0017")
     pts.set_pixit("L2CAP", "TSPX_tester_mtu", "02A0")
     pts.set_pixit("L2CAP", "TSPX_iut_role_initiator", "True")
@@ -65,33 +60,13 @@ def set_pixits(ptses):
     pts.set_pixit("L2CAP", "TSPX_psm_authorization_required", "00F3")
     pts.set_pixit("L2CAP", "TSPX_psm_encryption_key_size_required", "00F4")
     pts.set_pixit("L2CAP", "TSPX_time_guard", "180000")
-    pts.set_pixit("L2CAP", "TSPX_timer_ertx", "120000")
-    pts.set_pixit("L2CAP", "TSPX_timer_ertx_max", "300000")
-    pts.set_pixit("L2CAP", "TSPX_timer_ertx_min", "60000")
     pts.set_pixit("L2CAP", "TSPX_timer_rtx", "10000")
     pts.set_pixit("L2CAP", "TSPX_timer_rtx_max", "1000")
     pts.set_pixit("L2CAP", "TSPX_timer_rtx_min", "60000")
-    pts.set_pixit("L2CAP", "TSPX_rfc_mode_tx_window_size", "08")
-    pts.set_pixit("L2CAP", "TSPX_rfc_mode_max_transmit", "03")
-    pts.set_pixit("L2CAP", "TSPX_rfc_mode_retransmission_timeout", "07D0")
-    pts.set_pixit("L2CAP", "TSPX_rfc_mode_monitor_timeout", "2EE0")
-    pts.set_pixit("L2CAP", "TSPX_rfc_mode_maximum_pdu_size", "02A0")
-    pts.set_pixit("L2CAP", "TSPX_extended_window_size", "0012")
     pts.set_pixit("L2CAP", "TSPX_use_implicit_send", "TRUE")
     pts.set_pixit("L2CAP", "TSPX_use_dynamic_pin", "FALSE")
     pts.set_pixit("L2CAP", "TSPX_iut_SDU_size_in_bytes", "144")
     pts.set_pixit("L2CAP", "TSPX_secure_simple_pairing_pass_key_confirmation", "FALSE")
-    pts.set_pixit("L2CAP", "TSPX_iut_address_type_random", "FALSE")
-    pts.set_pixit("L2CAP", "TSPX_tester_adv_interval_min", "0030")
-    pts.set_pixit("L2CAP", "TSPX_tester_adv_interval_max", "0050")
-    pts.set_pixit("L2CAP", "TSPX_tester_le_scan_interval", "0C80")
-    pts.set_pixit("L2CAP", "TSPX_tester_le_scan_window", "0C80")
-    pts.set_pixit("L2CAP", "TSPX_tester_conn_interval_min", "0028")
-    pts.set_pixit("L2CAP", "TSPX_tester_conn_interval_max", "0050")
-    pts.set_pixit("L2CAP", "TSPX_tester_conn_latency", "0000")
-    pts.set_pixit("L2CAP", "TSPX_tester_supervision_timeout", "00C8")
-    pts.set_pixit("L2CAP", "TSPX_tester_min_CE_length", "0050")
-    pts.set_pixit("L2CAP", "TSPX_tester_max_CE_length", "0C80")
     pts.set_pixit("L2CAP", "TSPX_generate_local_busy", "TRUE")
     pts.set_pixit("L2CAP", "TSPX_l2ca_cbmps_min", "0040")
     pts.set_pixit("L2CAP", "TSPX_l2ca_cbmps_max", "0100")
@@ -117,9 +92,6 @@ def test_cases(ptses):
                   "L2CAP", "TSPX_bd_addr_iut",
                   stack.gap.iut_addr_get_str())),
               TestFunc(lambda: pts.update_pixit_param(
-                  "L2CAP", "TSPX_bd_addr_iut_le",
-                  stack.gap.iut_addr_get_str())),
-              TestFunc(lambda: pts.update_pixit_param(
                   "L2CAP", "TSPX_spsm", format(le_psm, '04x'))),
               TestFunc(lambda: pts.update_pixit_param(
                   "L2CAP", "TSPX_psm_authentication_required", format(le_psm, '04x'))),
@@ -143,10 +115,6 @@ def test_cases(ptses):
                   "L2CAP", "TSPX_l2ca_cbmtu_min", format(64, '04x'))),
               TestFunc(lambda: pts.update_pixit_param(
                   "L2CAP", "TSPX_l2ca_cbmtu_max", format(256, '04x'))),
-              TestFunc(lambda: pts.update_pixit_param(
-                  "L2CAP", "TSPX_iut_address_type_random",
-                  "TRUE" if stack.gap.iut_addr_is_random()
-                  else "FALSE")),
               TestFunc(btp.set_pts_addr, pts_bd_addr, Addr.le_public)]
 
     pre_conditions = common + [TestFunc(stack.l2cap_init, le_psm, le_initial_mtu)]
@@ -162,6 +130,79 @@ def test_cases(ptses):
     pre_conditions_author = common + [TestFunc(stack.l2cap_init, le_psm, le_initial_mtu),
                                       TestFunc(btp.l2cap_le_listen, le_psm, le_initial_mtu,
                                                L2CAPConnectionResponse.insufficient_authorization)]
+
+    br_pre_cond = common + [
+        TestFunc(lambda: pts.update_pixit_param("L2CAP", "TSPX_psm", format(br_psm, '04x'))),
+        TestFunc(lambda: pts.update_pixit_param("L2CAP", "TSPX_delete_link_key", "FALSE")),
+        TestFunc(lambda: pts.update_pixit_param("L2CAP", "TSPX_delete_ltk", "FALSE")),
+        TestFunc(lambda: pts.update_pixit_param("L2CAP", "TSPX_iut_role_initiator", "False")),
+        TestFunc(btp.gap_set_io_cap, IOCap.no_input_output),
+    ]
+
+    br_l2cap = br_pre_cond + [
+        TestFunc(stack.l2cap_init, br_psm, br_initial_mtu),
+    ]
+
+    br_l2cap_success = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption),
+    ]
+
+    br_l2cap_success_ret = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_RET),
+    ]
+
+    br_l2cap_success_fc = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_FC),
+    ]
+
+    br_l2cap_success_eret = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_ERET),
+    ]
+
+    br_l2cap_success_stream = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_STREAM),
+    ]
+
+    br_l2cap_success_eret_no_fcs = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_ERET,
+                 defs.L2CAP_LISTEN_V2_OPT_NO_FCS),
+    ]
+
+    br_l2cap_success_stream_no_fcs = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_STREAM,
+                 defs.L2CAP_LISTEN_V2_OPT_NO_FCS),
+    ]
+
+    br_l2cap_success_eret_hold_credit = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_ERET,
+                 defs.L2CAP_LISTEN_V2_OPT_HOLD_CREDIT),
+    ]
+
+    br_l2cap_success_eret_optional = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_ERET,
+                 defs.L2CAP_LISTEN_V2_OPT_MODE_OPTIONAL),
+    ]
+
+    br_l2cap_success_stream_optional = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_STREAM,
+                 defs.L2CAP_LISTEN_V2_OPT_MODE_OPTIONAL),
+    ]
+
+    br_l2cap_success_eret_extended_control = br_l2cap + [
+        TestFunc(btp.l2cap_br_listen_v2, br_psm, br_initial_mtu,
+                 L2CAPConnectionResponse.insufficient_encryption, defs.L2CAP_LISTEN_V2_MODE_ERET,
+                 defs.L2CAP_LISTEN_V2_OPT_EXT_WIN_SIZE),
+    ]
 
     custom_test_cases = [
         ZTestCase("L2CAP", "L2CAP/LE/CFC/BV-04-C",
@@ -226,6 +267,361 @@ def test_cases(ptses):
                   pre_conditions_success +
                   [TestFunc(lambda: pts.update_pixit_param("L2CAP", "TSPX_iut_role_initiator", "False")),
                    TestFunc(btp.core_reg_svc_gatt)],
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BV-07-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BV-08-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BV-09-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-01-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-01-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-02-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-03-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-11-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-12-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-14-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-08-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BV-03-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-06-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-07-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-04-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-08-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-10-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-12-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-14-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-15-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BI-03-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BV-04-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/ECH/BV-02-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/ECH/BV-01-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/IEX/BV-01-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/IEX/BV-02-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/EXF/BV-07-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-10-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/RTX/BV-01-C",
+                  br_l2cap_success_ret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/RTX/BV-02-C",
+                  br_l2cap_success_ret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/RTX/BV-03-C",
+                  br_l2cap_success_ret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BV-10-C",
+                  br_l2cap_success_fc,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/FLC/BV-01-C",
+                  br_l2cap_success_fc,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/FLC/BV-02-C",
+                  br_l2cap_success_fc,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/FLC/BV-03-C",
+                  br_l2cap_success_fc,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/FLC/BV-04-C",
+                  br_l2cap_success_fc,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-13-C",
+                  br_l2cap_success_fc,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-01-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-02-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-01-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-02-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-03-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-08-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-09-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-10-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-11-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-12-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-18-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-19-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-20-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-04-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-05-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/STM/BV-01-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/STM/BV-02-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/FOC/BV-06-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/FOC/BV-08-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/FOC/BV-01-C",
+                  br_l2cap_success_eret_no_fcs,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/FOC/BV-02-C",
+                  br_l2cap_success_eret_no_fcs,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/FOC/BV-03-C",
+                  br_l2cap_success_eret_no_fcs,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/FOC/BV-05-C",
+                  br_l2cap_success_eret_no_fcs,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/OFS/BV-05-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/OFS/BV-06-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/OFS/BV-01-C",
+                  br_l2cap_success_eret_no_fcs,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/OFS/BV-02-C",
+                  br_l2cap_success_eret_no_fcs,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/OFS/BV-07-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/OFS/BV-08-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/OFS/BV-03-C",
+                  br_l2cap_success_stream_no_fcs,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/OFS/BV-04-C",
+                  br_l2cap_success_stream_no_fcs,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-07-C",
+                  br_l2cap_success_eret_hold_credit +
+                  [TestFunc(lambda: pts.update_pixit_param("L2CAP", "TSPX_generate_local_busy", "False"))],
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-22-C",
+                  br_l2cap_success_eret_hold_credit +
+                  [TestFunc(lambda: pts.update_pixit_param("L2CAP", "TSPX_generate_local_busy", "False"))],
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-16-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BI-01-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BI-01-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BI-02-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-12-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BI-03-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BI-04-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-13-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-03-C",
+                  br_l2cap_success_eret_optional,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-07-C",
+                  br_l2cap_success_eret_optional,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-10-C",
+                  br_l2cap_success_eret_optional,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-06-C",
+                  br_l2cap_success_stream_optional,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-08-C",
+                  br_l2cap_success_stream_optional,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-11-C",
+                  br_l2cap_success_stream_optional,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-23-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/STM/BV-03-C",
+                  br_l2cap_success_stream,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-09-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BI-05-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BI-06-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-14-C",
+                  br_l2cap_success_stream_optional,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/CMC/BV-15-C",
+                  br_l2cap_success_stream_optional,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-05-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-06-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-13-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BI-03-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BI-04-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BI-05-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-14-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ERM/BV-15-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/EWC/BV-01-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/EWC/BV-02-C",
+                  br_l2cap_success_eret,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/EWC/BV-03-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ECF/BV-01-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ECF/BV-02-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ECF/BV-03-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ECF/BV-04-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ECF/BV-05-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ECF/BV-06-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ECF/BV-07-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/ECF/BV-08-C",
+                  br_l2cap_success_eret_extended_control,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CFD/BV-09-C",
+                  br_l2cap_success +
+                  [TestFunc(lambda: pts.update_pixit_param("L2CAP", "TSPX_iut_role_initiator", "True")),],
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BV-01-C",
+                  br_l2cap_success +
+                  [TestFunc(lambda: pts.update_pixit_param("L2CAP", "TSPX_iut_role_initiator", "True")),],
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BV-12-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/COS/CED/BV-11-C",
+                  br_l2cap_success,
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/LE/CID/BV-01-C",
+                  br_pre_cond + [TestFunc(stack.l2cap_init, le_psm, le_initial_mtu)],
+                  generic_wid_hdl=l2cap_wid_hdl),
+        ZTestCase("L2CAP", "L2CAP/LE/CID/BV-02-C",
+                  br_l2cap_success +
+                  [TestFunc(stack.l2cap_init, le_psm, le_initial_mtu),
+                   TestFunc(btp.l2cap_le_listen, le_psm, le_initial_mtu,
+                            L2CAPConnectionResponse.success)],
                   generic_wid_hdl=l2cap_wid_hdl),
     ]
 

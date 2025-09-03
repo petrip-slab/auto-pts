@@ -17,16 +17,16 @@ import logging
 import re
 import time
 
-from autopts.pybtp import btp
-from autopts.pybtp.types import Perm, MeshVals, WIDParams, UUID
 from autopts.ptsprojects.stack import get_stack
-from autopts.wid import generic_wid_hdl
+from autopts.pybtp import btp
+from autopts.pybtp.types import MeshVals, Perm, WIDParams
 
 # Mesh ATS ver. 1.0
 log = logging.debug
 
 
 def mesh_wid_hdl(wid, description, test_case_name):
+    from autopts.wid import generic_wid_hdl
     log(f'{mesh_wid_hdl.__name__}, {wid}, {description}, {test_case_name}')
     return generic_wid_hdl(wid, description, test_case_name, [__name__])
 
@@ -788,7 +788,7 @@ def hdl_wid_83(_: WIDParams):
     """
     description: Please let PB-GATT client initiate a GATT connection to the PTS.
     """
-    #TODO: this will need to (probably) be changed for MESH/CL/MPXS/BV-YY-C
+    # TODO: this will need to (probably) be changed for MESH/CL/MPXS/BV-YY-C
     # (MESH/CL/MPXS/BV-09-C), to use btp.mesh_proxy_connect().
     btp.mesh_proxy_connect()
 
@@ -1209,6 +1209,7 @@ def hdl_wid_255(_: WIDParams):
     """
     return True
 
+
 def hdl_wid_234(_: WIDParams):
     """
     Implements:
@@ -1216,6 +1217,7 @@ def hdl_wid_234(_: WIDParams):
                  set to 12
     """
     return True
+
 
 def hdl_wid_260(_: WIDParams):
     """
@@ -1729,8 +1731,7 @@ def hdl_wid_332(_: WIDParams):
                  Tester 2 to IUT, and then send Friend Poll from IUT to Lower Tester 1.
     """
     stack = get_stack()
-    assert stack.mesh.wait_for_lpn_established(timeout=60)
-    return True
+    return stack.mesh.wait_for_lpn_established(timeout=60)
 
 
 def hdl_wid_333(_: WIDParams):
@@ -1740,9 +1741,7 @@ def hdl_wid_333(_: WIDParams):
                  Please click OK when friendship is terminated.
     """
     stack = get_stack()
-    assert stack.mesh.wait_for_lpn_terminated(timeout=60)
-
-    return True
+    return stack.mesh.wait_for_lpn_terminated(timeout=60)
 
 
 def hdl_wid_335(_: WIDParams):
@@ -1958,6 +1957,7 @@ def hdl_wid_394(_: WIDParams):
     btp.mesh_proxy_identity()
     return True
 
+
 def hdl_wid_395(_: WIDParams):
     """
     Implements:
@@ -1966,12 +1966,14 @@ def hdl_wid_395(_: WIDParams):
     btp.mesh_proxy_solicit()
     return True
 
+
 def hdl_wid_423(_: WIDParams):
     """
     Implements:
     description: PTS expects IUT not to send DIRECTED_PROXY_CAPABILITIES_STATUS message.
     """
     return True
+
 
 def hdl_wid_500(params: WIDParams):
     """
@@ -2490,6 +2492,7 @@ def hdl_wid_515(params: WIDParams):
 
         return [net_key_index, app_key_idx, app_key_up] == stack.mesh.model_data
 
+
 def parse_command_parameters(desc):
     field_dict = {}
     txt = desc.splitlines()[1:]
@@ -2846,9 +2849,7 @@ def hdl_wid_560(_: WIDParams):
     description: Lower Tester 2 is waiting for IUT's heartbeat triggered by friendship termination.
     """
     stack = get_stack()
-    assert stack.mesh.wait_for_lpn_terminated(timeout=60)
-
-    return True
+    return stack.mesh.wait_for_lpn_terminated(timeout=60)
 
 
 def hdl_wid_561(_: WIDParams):
@@ -2857,9 +2858,7 @@ def hdl_wid_561(_: WIDParams):
     description: Lower Tester 2 is waiting for IUT's heartbeat triggered by friendship establishment.
     """
     stack = get_stack()
-    assert stack.mesh.wait_for_lpn_established(timeout=60)
-
-    return True
+    return stack.mesh.wait_for_lpn_established(timeout=60)
 
 
 def hdl_wid_562(_: WIDParams):
@@ -2879,8 +2878,7 @@ def hdl_wid_563(_: WIDParams):
                  to IUT (Low Power Node).
     """
     stack = get_stack()
-    assert stack.mesh.wait_for_lpn_established(timeout=60)
-    return True
+    return stack.mesh.wait_for_lpn_established(timeout=60)
 
 
 def hdl_wid_564(_: WIDParams):
@@ -2891,9 +2889,7 @@ def hdl_wid_564(_: WIDParams):
                  to IUT (Low Power Node).
     """
     stack = get_stack()
-    assert stack.mesh.wait_for_lpn_established(timeout=60)
-
-    return True
+    return stack.mesh.wait_for_lpn_established(timeout=60)
 
 
 def hdl_wid_600(_: WIDParams):
@@ -3238,6 +3234,7 @@ def hdl_wid_650(params: WIDParams):
 
         return stack.mesh.status == 0x01
 
+
 def hdl_wid_661(params: WIDParams):
     """
     Implements:
@@ -3261,6 +3258,7 @@ def hdl_wid_661(params: WIDParams):
     btp.mesh_start()
 
     return True
+
 
 def hdl_wid_672(_: WIDParams):
     """
@@ -3390,6 +3388,7 @@ def hdl_wid_707(_: WIDParams):
     btp.mesh_rpr_link_close(stack.mesh.address_lt1)
     return True
 
+
 def hdl_wid_708(_: WIDParams):
     """
     Implements:
@@ -3404,6 +3403,7 @@ def hdl_wid_708(_: WIDParams):
 
     return False
 
+
 def hdl_wid_709(_: WIDParams):
     """
     Implements:
@@ -3414,6 +3414,7 @@ def hdl_wid_709(_: WIDParams):
 
     btp.mesh_rpr_reprov_remote(stack.mesh.address_lt1, stack.mesh.address_lt1, False)
     return True
+
 
 def hdl_wid_710(_: WIDParams):
     """
@@ -3426,6 +3427,7 @@ def hdl_wid_710(_: WIDParams):
     btp.mesh_rpr_reprov_remote(stack.mesh.address_lt1, 0x0300, False)
     return True
 
+
 def hdl_wid_711(_: WIDParams):
     """
     Implemets:
@@ -3436,6 +3438,7 @@ def hdl_wid_711(_: WIDParams):
 
     btp.mesh_rpr_reprov_remote(stack.mesh.address_lt1, stack.mesh.address_lt1, True)
     return True
+
 
 def hdl_wid_712(desc):
     """
@@ -3689,7 +3692,7 @@ def hdl_wid_920(params: WIDParams):
     description: Please send SUBNET_BRIDGE_GET:
 
     MeshApplicationData::Network Header
-    Network Header: 
+    Network Header:
         NID: <WildCard: Exists>
         IVI: <WildCard: Exists>
         TTL: <WildCard: Exists>
@@ -3715,7 +3718,7 @@ def hdl_wid_921(params: WIDParams):
     description: Please send SUBNET_BRIDGE_SET:
 
     MeshApplicationData::Network Header
-    Network Header: 
+    Network Header:
         NID: <WildCard: Exists>
         IVI: <WildCard: Exists>
         TTL: <WildCard: Exists>
@@ -3867,7 +3870,7 @@ def hdl_wid_926(params: WIDParams):
     description: Please send BRIDGE_CAPABILITY_GET:
 
     MeshApplicationData::Network Header
-    Network Header: 
+    Network Header:
         NID: <WildCard: Exists>
         IVI: <WildCard: Exists>
         TTL: <WildCard: Exists>
@@ -4020,7 +4023,6 @@ def hdl_wid_955(_: WIDParams):
 
     btp.mesh_srpl_clear(stack.mesh.lt1_addr, 1, 5, 0)
     return True
-
 
 
 def hdl_wid_20101(_: WIDParams):

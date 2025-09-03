@@ -25,43 +25,48 @@ $ eval `ssh-agent`
 $ ssh-add path/to/id_rsa
 """
 import copy
+import functools
 import json
 import logging
+import mimetypes
 import os
 import re
 import shlex
-import sys
 import shutil
-import threading
-import schedule
-import requests
-import mimetypes
-import functools
-import traceback
 import subprocess
+import sys
+import threading
+import traceback
+from datetime import date, datetime, timedelta
 from os import listdir
+from os.path import abspath, dirname
 from pathlib import Path
 from time import sleep, time
-from os.path import dirname, abspath
-from datetime import datetime, date, timedelta
+
+import requests
+import schedule
 
 AUTOPTS_REPO = dirname(dirname(dirname(abspath(__file__))))
 sys.path.insert(0, AUTOPTS_REPO)
 
-from autopts.utils import get_global_end, terminate_process
-from tools.cron.autopts_bisect import Bisect, set_run_test_fun
-from autopts.bot.common import load_module_from_path, save_files
-from autopts.bot.common_features.github import update_repos
-from autopts.bot.common_features.mail import send_mail
-from autopts.config import generate_file_paths, FILE_PATHS
-from tools.cron.compatibility import find_latest, find_by_project_hash, find_by_autopts_hash, find_by_pts_ver, \
-    get_hash_from_reference
-from tools.cron.remote_terminal import RemoteTerminalClientProxy
-from tools.merge_db import TestCaseTable
-
+from autopts.bot.common import load_module_from_path, save_files  # noqa: E402 # the order of import is very important here
+from autopts.bot.common_features.github import update_repos  # noqa: E402 # the order of import is very important here
+from autopts.bot.common_features.mail import send_mail  # noqa: E402 # the order of import is very important here
+from autopts.config import FILE_PATHS, generate_file_paths  # noqa: E402 # the order of import is very important here
+from autopts.utils import get_global_end, terminate_process  # noqa: E402 # the order of import is very important here
+from tools.cron.autopts_bisect import Bisect, set_run_test_fun  # noqa: E402 # the order of import is very important here
+from tools.cron.compatibility import (  # noqa: E402 # the order of import is very important here
+    find_by_autopts_hash,
+    find_by_project_hash,
+    find_by_pts_ver,
+    find_latest,
+    get_hash_from_reference,
+)
+from tools.cron.remote_terminal import RemoteTerminalClientProxy  # noqa: E402 # the order of import is very important here
+from tools.merge_db import TestCaseTable  # noqa: E402 # the order of import is very important here
 
 if sys.platform == 'win32':
-    import wmi
+    pass
 
 log = logging.info
 CRON_CFG = {}
@@ -79,7 +84,7 @@ def catch_exceptions(cancel_on_failure=False):
         def __catch_exceptions(*args, **kwargs):
             try:
                 return job_func(*args, **kwargs)
-            except:
+            except Exception:
                 log(traceback.format_exc())
                 if hasattr(CRON_CFG, 'email'):
                     magic_tag = kwargs['magic_tag'] if 'magic_tag' in kwargs else None
@@ -94,12 +99,19 @@ def catch_exceptions(cancel_on_failure=False):
 def catch_connection_error(func):
     def _catch_exceptions(*args, **kwargs):
         while not get_global_end():
+            response = None
+            error_occurred = False
             try:
-                return func(*args, **kwargs)
+                response = func(*args, **kwargs)
             except requests.exceptions.ConnectionError:
                 log('Internet connection error')
+                error_occurred = True
                 sleep(1)
-    return _catch_exceptions
+
+            if not error_occurred:
+                return response
+
+        return _catch_exceptions
 
 
 def sleep_job(cancel_object, delay):
@@ -122,7 +134,7 @@ def report_to_review_msg(report_path):
     passed = []
     msg = 'AutoPTS Bot results:\n'
 
-    with open(report_path, 'r') as f:
+    with open(report_path) as f:
         f.readline()
 
         while True:
@@ -155,7 +167,7 @@ def error_to_review_msg(config):
         msg += 'Reason unknown'
         return msg
 
-    with open(error_txt_path, 'r') as f:
+    with open(error_txt_path) as f:
         while True:
             line = f.readline()
 
@@ -173,10 +185,10 @@ def send_mail_exception(conf_name, email_cfg, exception, magic_tag=None):
         return
 
     iso_cal = date.today().isocalendar()
-    ww_dd_str = 'WW%s.%s' % (iso_cal[1], iso_cal[2])
+    ww_dd_str = f"WW{iso_cal[1]}.{iso_cal[2]}"
 
     if magic_tag is not None:
-        job_type_info = '<p>Session was triggered with magic sentence: {}</p>'.format(magic_tag)
+        job_type_info = f'<p>Session was triggered with magic sentence: {magic_tag}</p>'
     else:
         job_type_info = '<p>Session was triggered with cyclical schedule</p>'
 
@@ -190,10 +202,7 @@ def send_mail_exception(conf_name, email_cfg, exception, magic_tag=None):
     <p> {}</p>
     '''.format(ww_dd_str, job_type_info, conf_name, exception, email_cfg['name'])
 
-    attachments = []
-    for file in ['stdout_autoptsbot.log', 'stdout_autoptsserver.log']:
-        if os.path.exists(file):
-            attachments.append(file)
+    attachments = [file for file in ['stdout_autoptsbot.log', 'stdout_autoptsserver.log'] if os.path.exists(file)]
 
     subject = 'AutoPTS session FAILED - fail logs'
     send_mail(email_cfg, subject, body, attachments)
@@ -209,7 +218,7 @@ def clear_workspace(workspace_dir):
                     try:
                         if not f.name.endswith(('.pqw6', '.pts', '.gitignore', '.xlsx', '.bls', '.bqw')):
                             os.remove(f)
-                    except:
+                    except Exception:
                         pass
 
 
@@ -352,7 +361,7 @@ def pre_cleanup_files(config):
                     shutil.rmtree(file_path, ignore_errors=True)
 
         save_files(files_to_save, save_dir)
-    except:
+    except Exception:
         pass
 
 
@@ -372,7 +381,7 @@ def git_reset_head(cwd):
 
 
 def git_checkout(branch, cwd):
-    cmd = 'git checkout {}'.format(branch)
+    cmd = f'git checkout {branch}'
     log(f'Running: {cmd}')
     check_call(cmd.split(), cwd=cwd)
 
@@ -384,13 +393,11 @@ def git_rebase_abort(cwd):
 
 
 def merge_pr_branch(pr_source_repo_owner, pr_source_branch, repo_name, project_repo):
-    cmd = 'git fetch https://github.com/{}/{}.git'.format(
-        pr_source_repo_owner, repo_name)
+    cmd = f'git fetch https://github.com/{pr_source_repo_owner}/{repo_name}.git'
     log(f'Running: {cmd}')
     check_call(cmd.split(), cwd=project_repo)
 
-    cmd = 'git pull --rebase https://github.com/{}/{}.git {}'.format(
-        pr_source_repo_owner, repo_name, pr_source_branch)
+    cmd = f'git pull --rebase https://github.com/{pr_source_repo_owner}/{repo_name}.git {pr_source_branch}'
     log(f'Running: {cmd}')
     check_call(cmd.split(), cwd=project_repo)
 
@@ -400,7 +407,7 @@ def parse_yaml(file_path):
     parsed_dict = {}
 
     if os.path.exists(file_path):
-        with open(file_path, 'r') as stream:
+        with open(file_path) as stream:
             parsed_dict = yaml.safe_load(stream)
 
     return parsed_dict
@@ -442,7 +449,7 @@ def start_vm(config, checkout_repos=False):
 
         while True:
             try:
-                log(client.run_command(f"echo Connected", None))
+                log(client.run_command("echo Connected", None))
                 break
             except BaseException:
                 if timeout_flag.is_set():
@@ -485,13 +492,13 @@ def close_vm(config):
                                        ) as client:
             log(client.run_command(config['vm']['vm_close_cmd'], None))
         sleep(config['vm']['max_close_time'])
-    except BaseException as e:
+    except BaseException:
         log(f"Remote server at IP {config['remote_machine']['terminal_ip']} "
             f"port {config['remote_machine']['terminal_port']} is not reachable")
 
 
 def close_remote_autoptsserver(config):
-    log(f"Closing remote autoptsserver and PTS")
+    log("Closing remote autoptsserver and PTS")
     try:
         config = config['cron']['remote_machine']
         with RemoteTerminalClientProxy(config['terminal_ip'],
@@ -501,7 +508,7 @@ def close_remote_autoptsserver(config):
             client.terminate_process(None, 'PTS', None)
             client.terminate_process(None, 'FTS', None)
             client.terminate_process(None, None, 'autoptsserver.py')
-    except BaseException as e:
+    except BaseException:
         log(f"Remote server at IP {config['terminal_ip']} port {config['terminal_port']} is not reachable")
 
 
@@ -565,7 +572,7 @@ def _start_processes(config, checkout_repos):
         if srv_process and srv_process.poll() is None:
             srv_process.terminate()
 
-        return
+        return None, None
 
     log(f"Running: {config['bot_start_cmd']}")
     bot_process = subprocess.Popen(config['bot_start_cmd'],
@@ -578,86 +585,185 @@ def _start_processes(config, checkout_repos):
 
 
 def _restart_processes(config):
-    while not config['cron']['cancel_job'].canceled:
-        try:
+    try:
+        while not config['cron']['cancel_job'].canceled:
             terminate_processes(config)
             return _start_processes(config, checkout_repos=False)
-        except OSError:
-            log(traceback.format_exc())
+    except OSError:
+        log(traceback.format_exc())
 
 
-def _run_test(config):
-    test_cases_completed = False
-    backup = config['auto_pts'].get('use_backup', False)
-    timeguard = config['cron']['test_run_timeguard']
-    startup_fail_count = config['cron'].get('startup_fail_max_count', 2)
-    results_file_path = config['file_paths']['TC_STATS_JSON_FILE']
-    all_stats_file_path = config['file_paths']['ALL_STATS_JSON_FILE']
-    report_file_path = config['file_paths']['REPORT_TXT_FILE']
-    error_file_path = config['file_paths']['ERROR_TXT_FILE']
+def _run_test_without_backup(config):
+    cancel_job = config['cron']['cancel_job']
+    check_interval = config['cron']['check_interval']
+    report_file = config['file_paths']['REPORT_TXT_FILE']
+    error_file = config['file_paths']['ERROR_TXT_FILE']
 
-    srv_process, bot_process = _start_processes(config, checkout_repos=True)
-    last_check_time = time()
+    srv_proc, bot_proc = _start_processes(config, checkout_repos=True)
 
     # Main thread waits for at least one of subprocesses to finish
-    while not config['cron']['cancel_job'].canceled:
-        sleep_job(config['cron']['cancel_job'], config['cron']['check_interval'])
+    while not cancel_job.canceled:
+        sleep_job(cancel_job, check_interval)
 
-        if os.path.exists(error_file_path):
+        if os.path.exists(error_file):
             break
 
-        if srv_process and srv_process.poll() is not None:
+        if srv_proc and srv_proc.poll() is not None:
             log('server process finished.')
             break
 
-        if bot_process.poll() is not None:
+        if bot_proc.poll() is not None:
             log('bot process finished.')
-            if os.path.exists(report_file_path):
-                break
+            if not os.path.exists(report_file):
+                log("AutoPTS bot terminated before report creation. Restarting processes...")
 
-            elif backup:
-                log("Autopts bot terminated before report creation. Restarting processes...")
-                srv_process, bot_process = _restart_processes(config)
-                sleep_job(config['cron']['cancel_job'], timeguard)
+            break
 
-        if not backup:
-            continue
 
+def _await_test_run_start(config):
+    cancel_job = config['cron']['cancel_job']
+    results_file = config['file_paths']['TC_STATS_JSON_FILE']
+    error_file = config['file_paths']['ERROR_TXT_FILE']
+    timeguard = config['cron']['test_run_timeguard']
+    check_interval = config['cron']['check_interval']
+    startup_fail_count = config['cron'].get('startup_fail_max_count', 2)
+
+    srv_proc, bot_proc = _start_processes(config, checkout_repos=True)
+    last_check = time()
+
+    while not cancel_job.canceled:
+        sleep_job(cancel_job, check_interval)
         current_time = time()
 
-        if not test_cases_completed and not os.path.exists(results_file_path):
-            if timedelta(seconds=current_time - last_check_time) > timedelta(seconds=timeguard):
-                if startup_fail_count == 0:
-                    log("Test run has not been started on time. No more retries...")
-                    break
+        if os.path.exists(results_file):
+            log("Bot has started producing results.")
+            return srv_proc, bot_proc
 
-                startup_fail_count -= 1
-                log("Test run has not been started on time. Restarting processes...")
-                srv_process, bot_process = _restart_processes(config)
+        startup_timeout = timedelta(seconds=current_time - last_check) > timedelta(seconds=timeguard)
+        bot_died = bot_proc.poll() is not None
+        critical_error = os.path.exists(error_file)
 
+        if startup_timeout or bot_died or critical_error:
+            log("Bot failed before initialization complete.")
+
+            if startup_fail_count <= 0:
+                log("Bot did not start the test run in time. No more retries.")
+                return None, None
+
+            startup_fail_count -= 1
+            log(f"Startup timeout. Restarting... ({startup_fail_count} retries left)")
+
+            if critical_error:
+                os.remove(error_file)
+
+            srv_proc, bot_proc = _restart_processes(config)
+            last_check = current_time
+
+    log("Job was cancelled during startup wait.")
+    return None, None
+
+
+def _is_test_run_completed(all_stats_file):
+    completed = False
+
+    if os.path.exists(all_stats_file):
+        try:
+            with open(all_stats_file) as f:
+                data = json.load(f)
+                completed = data.get('test_run_completed', False)
+        except BaseException as e:
+            log(e)
+
+    return completed
+
+
+def _await_test_run_end(config, srv_proc, bot_proc):
+    cancel_job = config['cron']['cancel_job']
+    results_file = config['file_paths']['TC_STATS_JSON_FILE']
+    error_file = config['file_paths']['ERROR_TXT_FILE']
+    all_stats_file = config['file_paths']['ALL_STATS_JSON_FILE']
+    timeguard = config['cron']['test_run_timeguard']
+    check_interval = config['cron']['check_interval']
+    critical_error_max_count = config['cron'].get('critical_error_max_count', 2)
+    critical_error_count = 0
+
+    while not cancel_job.canceled:
+        sleep_job(cancel_job, check_interval)
+        current_time = time()
+
+        if _is_test_run_completed(all_stats_file):
+            log("Bot completed running the test cases. Waiting for the report to be generated ...")
+            return srv_proc, bot_proc
+
+        timeout = None
+        if os.path.exists(results_file):
+            # After each completed test case the result file should be updated.
+            # If it is not, it means the bot is stuck on some test case.
+            timeout = (timedelta(seconds=current_time - os.path.getmtime(results_file))
+                       > timedelta(seconds=timeguard))
+
+        bot_died = bot_proc.poll() is not None
+        critical_error = os.path.exists(error_file)
+
+        if timeout or bot_died or critical_error:
+            if timeout:
+                log("Test run results have not been updated for a while.")
+
+            if bot_died:
+                if not os.path.exists(all_stats_file) and not os.path.exists(results_file):
+                    log("Bot completed running the test cases.")
+                    return srv_proc, bot_proc
+
+                log("AutoPTS bot probably crashed.")
+
+            if critical_error:
+                log("Bot generated error file.")
+                if critical_error_count == critical_error_max_count:
+                    log("No more retries.")
+                    return None, None
+
+                critical_error_count += 1
+                log(f"Retry {critical_error_count}")
+                os.remove(error_file)
+
+            log("Restarting processes...")
+            srv_proc, bot_proc = _restart_processes(config)
+            sleep_job(config['cron']['cancel_job'], timeguard)
             continue
 
-        startup_fail_count = config['cron'].get('startup_fail_max_count', 2)
-        last_check_time = current_time
+        critical_error_count = 0
 
-        if (not test_cases_completed and
-                timedelta(seconds=current_time - os.path.getmtime(results_file_path)) > timedelta(seconds=timeguard)):
-            if os.path.exists(all_stats_file_path):
-                try:
-                    with open(all_stats_file_path, 'r') as f:
-                        data = json.load(f)
-                        test_cases_completed = data.get('test_run_completed', False)
-                except BaseException as e:
-                    log(e)
+    log("Job was cancelled during test run.")
+    return None, None
 
-            # Do not restart bot if test_run_completed, because pulling PTS logs at the end
-            # of the bot run takes a while, and it should not be interrupted.
-            if test_cases_completed:
-                log("Bot completed running the test cases. Waiting for report to be generated ...")
-            else:
-                log("Test run results have not been updated for a while. Restarting processes...")
-                srv_process, bot_process = _restart_processes(config)
-                sleep_job(config['cron']['cancel_job'], timeguard)
+
+def _await_bot_cleanup_end(config, srv_proc, bot_proc):
+    cancel_job = config['cron']['cancel_job']
+
+    while not cancel_job.canceled and bot_proc.poll() is None:
+        pass
+
+
+def _run_test(config):
+    backup = config['auto_pts'].get('use_backup', False)
+
+    if not backup:
+        _run_test_without_backup(config)
+        return
+
+    srv_proc, bot_proc = _await_test_run_start(config)
+    bot_died = bot_proc.poll() is not None
+    srv_died = srv_proc and srv_proc.poll() is not None
+    if srv_died or bot_died:
+        return
+
+    srv_proc, bot_proc = _await_test_run_end(config, srv_proc, bot_proc)
+    bot_died = bot_proc.poll() is not None
+    srv_died = srv_proc and srv_proc.poll() is not None
+    if srv_died or bot_died:
+        return
+
+    _await_bot_cleanup_end(config, srv_proc, bot_proc)
 
 
 def run_test(config):
@@ -666,7 +772,7 @@ def run_test(config):
 
     try:
         _run_test(config)
-    except:
+    except Exception:
         log(traceback.format_exc())
     finally:
         terminate_processes(config)
@@ -795,7 +901,7 @@ def _generic_pr_job(cron, cfg, pr_cfg, **kwargs):
     try:
         merge_pr_branch(pr_cfg['source_repo_owner'], pr_cfg['source_branch'],
                         pr_cfg['repo_name'], repo_path)
-    except:
+    except Exception:
         git_rebase_abort(repo_path)
         return 'Failed to merge the PR branch'
 
